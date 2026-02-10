@@ -1,0 +1,33 @@
+menu "RO HMI Configuration"
+
+    menu "MQTT Settings"
+        config MQTT_BROKER_URI
+            string "MQTT Broker URI"
+            default "mqtt://192.168.1.1:1883"
+            help
+                URI of the MQTT broker (Mosquitto on Orange Pi).
+
+        config MQTT_CLIENT_ID
+            string "MQTT Client ID"
+            default "ro_hmi"
+    endmenu
+
+    menu "Ethernet Settings"
+        config ETH_MDC_GPIO
+            int "MDC GPIO"
+            default 31
+
+        config ETH_MDIO_GPIO
+            int "MDIO GPIO"
+            default 52
+
+        config ETH_PHY_ADDR
+            int "PHY Address"
+            default 1
+
+        config ETH_PHY_RST_GPIO
+            int "PHY Reset GPIO (-1 if not used)"
+            default -1
+    endmenu
+
+endmenu

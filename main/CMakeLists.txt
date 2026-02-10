@@ -1,0 +1,61 @@
+set(MAIN_SRCS
+    "app_main.c"
+    "board/display_init.c"
+    "board/touch_init.c"
+    "data/plant_data.c"
+    "data/alarm_ring.c"
+    "net/eth_init.c"
+    "mqtt/mqtt_app.c"
+    "mqtt/mqtt_parser.c"
+    "ui/ui_main.c"
+    "ui/ui_theme.c"
+    "ui/ui_common.c"
+    "ui/ui_events.c"
+    "ui/screens/scr_mnemonic.c"
+    "ui/screens/scr_parameters.c"
+    "ui/screens/scr_washing.c"
+    "ui/screens/scr_alarms.c"
+    "ui/screens/scr_settings.c"
+    "ui/screens/scr_diagnostics.c"
+    "i18n/lang.c"
+    "i18n/lang_en.c"
+    "i18n/lang_ru.c"
+    "fonts/Montserrat_12_4.c"
+    "fonts/Montserrat_14_4.c"
+    "fonts/Montserrat_16_4.c"
+    "fonts/Montserrat_18_4.c"
+    "fonts/Montserrat_20_4.c"
+    "fonts/Montserrat_22_4.c"
+    "fonts/Montserrat_24_4.c"
+    "fonts/Montserrat_28_4.c"
+    "fonts/Montserrat_36_4.c"
+)
+
+set(MAIN_INCLUDES
+    "."
+    "board"
+    "data"
+    "net"
+    "mqtt"
+    "ui"
+    "ui/screens"
+    "i18n"
+    "fonts"
+)
+
+idf_component_register(
+    SRCS ${MAIN_SRCS}
+    INCLUDE_DIRS ${MAIN_INCLUDES}
+    REQUIRES
+        esp_lcd
+        esp_lcd_jd9365
+        esp_lcd_touch_gsl3680
+        driver
+        esp_eth
+        nvs_flash
+        esp_event
+        esp_netif
+        mqtt
+        json
+        esp_timer
+)
