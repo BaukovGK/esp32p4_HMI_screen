@@ -25,6 +25,7 @@ typedef struct {
     lv_obj_t *alarm_label;  // Метка текста аварии (бегущая строка)
     lv_obj_t *mqtt_label;   // Метка статуса MQTT-соединения
     lv_obj_t *lang_btn;     // Кнопка переключения языка (RU/EN)
+    bool      stale;        // Флаг устаревших данных (нет связи с контроллером)
 } alarm_bar_ctx_t;
 
 static alarm_bar_ctx_t s_abar; // Единственный экземпляр контекста панели аварий
@@ -37,8 +38,10 @@ static void lang_btn_cb(lv_event_t *e)
 {
     (void)e;
     lang_set(lang_get() == LANG_RU ? LANG_EN : LANG_RU);
-    lv_obj_t *label = lv_obj_get_child(s_abar.lang_btn, 0);
-    lv_label_set_text(label, lang_get() == LANG_RU ? "RU" : "EN");
+    lv_obj_t *child = lv_obj_get_child(s_abar.lang_btn, 0);
+    if (child) {
+        lv_label_set_text(child, lang_get() == LANG_RU ? "RU" : "EN");
+    }
 }
 
 /**
@@ -52,7 +55,7 @@ static void lang_btn_cb(lv_event_t *e)
 lv_obj_t *ui_alarm_bar_create(lv_obj_t *parent)
 {
     lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, BOARD_DISP_H_RES, 40);  // Полная ширина экрана, высота 40px
+    lv_obj_set_size(bar, UI_SCREEN_WIDTH, UI_ALARM_BAR_HEIGHT);
     lv_obj_align(bar, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(bar, COLOR_BG_PANEL, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
@@ -102,20 +105,48 @@ lv_obj_t *ui_alarm_bar_create(lv_obj_t *parent)
  *  2. Авария -- код наиболее критичной активной аварии из кольцевого буфера
  *  3. MQTT -- статус подключения к брокеру
  */
+/**
+ * Установка флага устаревших данных.
+ * Вызывается из refresh_timer_cb перед ui_alarm_bar_update.
+ */
+void ui_alarm_bar_set_stale(lv_obj_t *bar, bool stale)
+{
+    (void)bar;
+    s_abar.stale = stale;
+}
+
 void ui_alarm_bar_update(lv_obj_t *bar, const plant_data_t *data)
 {
     (void)bar;
 
     // Обновление метки режима с подрежимами (АВТО / подэтап, ПРОМЫВКА / подэтап)
-    const char *mode_str = lang_str(STR_MODE_IDLE + (int)data->state);
-    char mode_buf[64];
+    int state_idx = (int)data->state;
+    const char *mode_str;
+    if (state_idx >= 0 && state_idx <= (int)(STR_MODE_UNKNOWN - STR_MODE_IDLE)) {
+        mode_str = lang_str(STR_MODE_IDLE + state_idx);
+    } else {
+        mode_str = lang_str(STR_MODE_UNKNOWN);
+    }
+    char mode_buf[128];
     if (data->state == PLANT_STATE_AUTO && data->auto_sub != AUTO_SUB_NONE) {
-        snprintf(mode_buf, sizeof(mode_buf), "%s / %s", mode_str,
-                 lang_str(STR_AUTO_STARTING_PUMP1 + (int)data->auto_sub - 1));
+        int auto_idx = (int)data->auto_sub - 1;
+        const char *auto_str;
+        if (auto_idx >= 0 && auto_idx <= (int)(STR_AUTO_STOPPING - STR_AUTO_STARTING_PUMP1)) {
+            auto_str = lang_str(STR_AUTO_STARTING_PUMP1 + auto_idx);
+        } else {
+            auto_str = lang_str(STR_MODE_UNKNOWN);
+        }
+        snprintf(mode_buf, sizeof(mode_buf), "%s / %s", mode_str, auto_str);
         lv_label_set_text(s_abar.mode_label, mode_buf);
     } else if (data->state == PLANT_STATE_WASHING && data->wash_sub != WASH_SUB_NONE) {
-        snprintf(mode_buf, sizeof(mode_buf), "%s / %s", mode_str,
-                 lang_str(STR_WASH_WAIT_HEAT + (int)data->wash_sub - 1));
+        int wash_idx = (int)data->wash_sub - 1;
+        const char *wash_str;
+        if (wash_idx >= 0 && wash_idx <= (int)(STR_WASH_DONE - STR_WASH_WAIT_HEAT)) {
+            wash_str = lang_str(STR_WASH_WAIT_HEAT + wash_idx);
+        } else {
+            wash_str = lang_str(STR_MODE_UNKNOWN);
+        }
+        snprintf(mode_buf, sizeof(mode_buf), "%s / %s", mode_str, wash_str);
         lv_label_set_text(s_abar.mode_label, mode_buf);
     } else {
         lv_label_set_text(s_abar.mode_label, mode_str);
@@ -138,6 +169,14 @@ void ui_alarm_bar_update(lv_obj_t *bar, const plant_data_t *data)
                       data->mqtt_connected ? "MQTT:OK" : "MQTT:--");
     lv_obj_set_style_text_color(s_abar.mqtt_label,
         data->mqtt_connected ? COLOR_STATE_AUTO : COLOR_STATE_FAULT, 0);
+
+    // При устаревших данных -- переопределить тексты аварии и режима
+    if (s_abar.stale) {
+        lv_label_set_text(s_abar.alarm_label, lang_str(STR_STATUS_NO_DATA));
+        lv_obj_set_style_text_color(s_abar.alarm_label, COLOR_STATE_FAULT, 0);
+        lv_label_set_text(s_abar.mode_label, lang_str(STR_MODE_UNKNOWN));
+        lv_obj_set_style_text_color(s_abar.mode_label, COLOR_STATE_IDLE, 0);
+    }
 }
 
 /* ========== Навигационная панель (Navigation Bar) ========== */
@@ -180,7 +219,7 @@ lv_obj_t *ui_nav_bar_create(lv_obj_t *parent, nav_cb_t on_select)
     s_nav.active = 0;
 
     lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_size(bar, BOARD_DISP_H_RES, 60); // Полная ширина, высота 60px
+    lv_obj_set_size(bar, UI_SCREEN_WIDTH, UI_NAV_BAR_HEIGHT);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_obj_set_style_bg_color(bar, COLOR_BG_PANEL, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);

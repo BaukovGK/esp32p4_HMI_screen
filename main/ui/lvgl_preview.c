@@ -294,10 +294,10 @@ void lvgl_live_preview_init(void)
     /* Alarm bar (40px top strip) */
     s_alarm_bar = ui_alarm_bar_create(scr);
 
-    /* Content area (1280 x 700) */
+    /* Content area (UI_SCREEN_WIDTH x UI_CONTENT_HEIGHT) */
     s_content = lv_obj_create(scr);
-    lv_obj_set_size(s_content, 1280, 700);
-    lv_obj_set_pos(s_content, 0, 40);
+    lv_obj_set_size(s_content, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+    lv_obj_set_pos(s_content, 0, UI_ALARM_BAR_HEIGHT);
     lv_obj_set_style_bg_color(s_content, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_content, 0, 0);

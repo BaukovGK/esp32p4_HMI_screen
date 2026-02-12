@@ -3,11 +3,11 @@
  * @brief Определения MQTT-топиков для связи с контроллером RO-установки.
  *
  * Все топики организованы в иерархию:
- * - ro_plant/status/#     -- статусная информация (HMI подписывается)
- * - ro_plant/alarms       -- аварийные сообщения (HMI подписывается)
- * - ro_plant/command/*    -- команды управления (HMI публикует)
- * - ro_plant/settings/*   -- настройки/уставки (HMI публикует)
- * - ro_hmi/availability   -- статус доступности HMI (online/offline)
+ * - ro_plant/status/#      -- статусная информация (HMI подписывается)
+ * - ro_plant/alarms        -- аварийные сообщения (HMI подписывается)
+ * - ro_plant/command/...   -- команды управления (HMI публикует)
+ * - ro_plant/settings/...  -- настройки/уставки (HMI публикует)
+ * - ro_hmi/availability    -- статус доступности HMI (online/offline)
  */
 #pragma once
 
@@ -75,3 +75,8 @@
 
 /** Настройки таймаутов насосов: pump_confirm_ms, pump_ramp_ms */
 #define MQTT_TOPIC_SET_TIMEOUTS     "ro_plant/settings/timeouts"
+
+/* Топик доступности HMI (Last Will + online) */
+
+/** Статус доступности HMI-дисплея: "online" / "offline" (retained, LWT) */
+#define MQTT_TOPIC_HMI_AVAILABILITY "ro_hmi/availability"

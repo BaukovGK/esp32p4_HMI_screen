@@ -27,7 +27,7 @@
 
 static const char *TAG = "display"; // Тег для логирования
 
-#define LCD_LEDC_CH  0 // Канал LEDC для ШИМ-подсветки дисплея
+/* Канал LEDC для ШИМ-подсветки дисплея — из board.h (BOARD_LCD_LEDC_CH) */
 
 /**
  * Инициализация ШИМ-подсветки дисплея через LEDC.
@@ -42,9 +42,9 @@ static esp_err_t backlight_init(void)
     // Настройка таймера LEDC: низкоскоростной режим, 20 кГц, 10-бит разрешение
     const ledc_timer_config_t timer_cfg = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_10_BIT, // 0..1023 уровней яркости
+        .duty_resolution = BOARD_LCD_LEDC_DUTY_BITS, // 0..1023 уровней яркости
         .timer_num = LEDC_TIMER_1,
-        .freq_hz = 20000, // 20 кГц — выше слышимого диапазона, без мерцания
+        .freq_hz = BOARD_LCD_LEDC_FREQ_HZ, // 20 кГц — выше слышимого диапазона, без мерцания
         .clk_cfg = LEDC_AUTO_CLK,
     };
     ESP_RETURN_ON_ERROR(ledc_timer_config(&timer_cfg), TAG, "LEDC timer config failed");
@@ -53,7 +53,7 @@ static esp_err_t backlight_init(void)
     const ledc_channel_config_t ch_cfg = {
         .gpio_num = BOARD_LCD_BACKLIGHT_GPIO, // GPIO23
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = LCD_LEDC_CH,
+        .channel = BOARD_LCD_LEDC_CH,
         .intr_type = LEDC_INTR_DISABLE,
         .timer_sel = LEDC_TIMER_1,
         .duty = 0, // Подсветка выключена при инициализации
@@ -77,8 +77,8 @@ static esp_err_t backlight_set(int brightness_percent)
     if (brightness_percent > 100) brightness_percent = 100;
     // Пересчёт процентов в значение скважности (10-бит: 0..1023)
     uint32_t duty = (1023 * brightness_percent) / 100;
-    ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, LCD_LEDC_CH, duty), TAG, "Set duty failed");
-    ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, LCD_LEDC_CH), TAG, "Update duty failed");
+    ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_LEDC_CH, duty), TAG, "Set duty failed");
+    ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_LEDC_CH), TAG, "Update duty failed");
     return ESP_OK;
 }
 
@@ -166,7 +166,7 @@ lv_display_t *display_init(void)
         .panel_handle = panel,
         .control_handle = NULL,
         .buffer_size = BOARD_LCD_DRAW_BUFF_SIZE, // 800 * 80 = 64000 пикселей
-        .double_buffer = false,                   // Одинарный буфер (экономия памяти)
+        .double_buffer = true,                    // Двойной буфер для плавного вывода
         .hres = BOARD_LCD_H_RES,                 // 800 (нативное)
         .vres = BOARD_LCD_V_RES,                 // 1280 (нативное)
         .monochrome = false,
@@ -191,14 +191,14 @@ lv_display_t *display_init(void)
     // Конфигурация DSI-специфичных параметров дисплея
     const lvgl_port_display_dsi_cfg_t dsi_disp_cfg = {
         .flags = {
-            .avoid_tearing = false, // Защита от тиринга отключена
+            .avoid_tearing = true,  // Защита от тиринга включена
         },
     };
 
     lv_display_t *disp = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_disp_cfg);
     if (!disp) {
         ESP_LOGE(TAG, "Failed to add display to LVGL");
-        return NULL;
+        goto cleanup;
     }
 
     /* 9. Программный поворот на 270 градусов — ландшафтный режим (1280x800) */
@@ -210,5 +210,17 @@ lv_display_t *display_init(void)
     ESP_LOGI(TAG, "Backlight on");
 
     return disp;
+
+cleanup:
+    if (panel) {
+        esp_lcd_panel_del(panel);
+    }
+    if (io) {
+        esp_lcd_panel_io_del(io);
+    }
+    if (dsi_bus) {
+        esp_lcd_del_dsi_bus(dsi_bus);
+    }
+    return NULL;
 }
 #endif /* !LVGL_LIVE_PREVIEW */

@@ -37,6 +37,7 @@ typedef struct {
     lv_obj_t *lbl_active_title; // Заголовок "Active Alarms (N)"
     lv_obj_t *lbl_history_title;// Заголовок "Alarm History"
     lv_obj_t *btn_reset;        // Кнопка СБРОС АВАРИИ
+    uint32_t  last_gen;         // Последнее значение alarm_ring_generation() (для детектирования изменений)
 } alarms_widgets_t;
 
 /* ---- Вспомогательные функции ---- */
@@ -65,18 +66,33 @@ static const char *alarm_cat_icon(alarm_category_t cat)
     }
 }
 
-/** Форматирует Unix-время в строку "HH:MM:SS". Если ts <= 0, выводит "--:--:--". */
+/**
+ * Форматирует метку времени аварии.
+ * Если ts > 1 000 000 000 — считается Unix-временем, выводит "DD.MM HH:MM".
+ * Иначе считается uptime (секунды с момента загрузки), выводит "Xh XXm XXs".
+ * Если ts <= 0, выводит "--:--:--".
+ */
 static void format_timestamp(char *buf, size_t len, int64_t ts_sec)
 {
     if (ts_sec <= 0) {
         snprintf(buf, len, "--:--:--");
         return;
     }
-    time_t t = (time_t)ts_sec;
-    struct tm tm_info;
-    localtime_r(&t, &tm_info);
-    snprintf(buf, len, "%02d:%02d:%02d",
-             tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
+    if (ts_sec > 1000000000LL) {
+        /* Unix timestamp — показываем дату и время */
+        time_t t = (time_t)ts_sec;
+        struct tm tm_info;
+        localtime_r(&t, &tm_info);
+        snprintf(buf, len, "%02d.%02d %02d:%02d",
+                 tm_info.tm_mday, tm_info.tm_mon + 1,
+                 tm_info.tm_hour, tm_info.tm_min);
+    } else {
+        /* Uptime — показываем часы/минуты/секунды */
+        int h = (int)(ts_sec / 3600);
+        int m = (int)((ts_sec % 3600) / 60);
+        int s = (int)(ts_sec % 60);
+        snprintf(buf, len, "%dh %02dm %02ds", h, m, s);
+    }
 }
 
 /**
@@ -132,17 +148,17 @@ static lv_obj_t *make_alarm_row(lv_obj_t *parent, const alarm_entry_t *entry)
     lv_obj_set_style_text_font(val, UI_FONT_14, 0);
 
     /* Timestamp */
-    char ts_buf[16];
+    char ts_buf[24];
     format_timestamp(ts_buf, sizeof(ts_buf), entry->ts);
     lv_obj_t *ts = lv_label_create(row);
     lv_label_set_text(ts, ts_buf);
-    lv_obj_set_width(ts, 100);
+    lv_obj_set_width(ts, 130);
     lv_obj_set_style_text_color(ts, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(ts, UI_FONT_14, 0);
 
     /* Active indicator */
     lv_obj_t *act = lv_label_create(row);
-    lv_label_set_text(act, entry->active ? "ACTIVE" : "");
+    lv_label_set_text(act, entry->active ? lang_str(STR_ALARM_ACTIVE_BADGE) : "");
     lv_obj_set_width(act, 80);
     lv_obj_set_style_text_color(act, COLOR_PUMP_FAULT, 0);
     lv_obj_set_style_text_font(act, UI_FONT_12, 0);
@@ -152,22 +168,37 @@ static lv_obj_t *make_alarm_row(lv_obj_t *parent, const alarm_entry_t *entry)
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+}
+
 /** Создаёт экран аварий: два прокручиваемых списка и кнопку сброса. */
 lv_obj_t *scr_alarms_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     alarms_widgets_t *w = lv_malloc(sizeof(alarms_widgets_t));
     lv_memzero(w, sizeof(alarms_widgets_t));
+    if (!w) return cont;
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- Active alarms section (top half) ---- */
     w->lbl_active_title = lv_label_create(cont);
-    lv_label_set_text(w->lbl_active_title, "Active Alarms (0)");
+    char init_title[64];
+    snprintf(init_title, sizeof(init_title), "%s (0)", lang_str(STR_ALARM_ACTIVE_TITLE));
+    lv_label_set_text(w->lbl_active_title, init_title);
     lv_obj_set_pos(w->lbl_active_title, 20, 8);
     lv_obj_set_style_text_color(w->lbl_active_title, COLOR_ALARM_ALARM, 0);
     lv_obj_set_style_text_font(w->lbl_active_title, UI_FONT_18, 0);
@@ -187,7 +218,7 @@ lv_obj_t *scr_alarms_create(lv_obj_t *parent)
 
     /* ---- History section (bottom half) ---- */
     w->lbl_history_title = lv_label_create(cont);
-    lv_label_set_text(w->lbl_history_title, "Alarm History");
+    lv_label_set_text(w->lbl_history_title, lang_str(STR_ALARM_HISTORY_TITLE));
     lv_obj_set_pos(w->lbl_history_title, 20, 290);
     lv_obj_set_style_text_color(w->lbl_history_title, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(w->lbl_history_title, UI_FONT_18, 0);
@@ -229,51 +260,58 @@ lv_obj_t *scr_alarms_create(lv_obj_t *parent)
 /* ---- Обновление ---- */
 
 /**
- * Перестраивает списки активных аварий и истории.
- * При каждом вызове очищает контейнеры (lv_obj_clean) и создаёт строки заново.
+ * Обновляет списки активных аварий и истории.
+ * Перестраивает виджеты только при изменении данных (по счётчику поколений alarm_ring).
  * Управляет видимостью кнопки СБРОС АВАРИИ (только при PLANT_STATE_FAULT).
  */
-void scr_alarms_update(lv_obj_t *container, const plant_data_t *d)
+void scr_alarms_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     alarms_widgets_t *w = (alarms_widgets_t *)lv_obj_get_user_data(container);
-    if (!w) return;
+    if (!w || !d) return;
+    (void)dirty;  /* generation-based check below already handles incremental updates */
 
-    /* ---- Active alarms ---- */
-    alarm_entry_t active[MAX_ACTIVE];
-    int n_active = alarm_ring_get_active(active, MAX_ACTIVE);
+    /* Only rebuild lists when alarm data has actually changed */
+    uint32_t gen = alarm_ring_generation();
+    if (gen != w->last_gen) {
+        w->last_gen = gen;
 
-    char title_buf[48];
-    snprintf(title_buf, sizeof(title_buf), "Active Alarms (%d)", n_active);
-    lv_label_set_text(w->lbl_active_title, title_buf);
+        /* ---- Active alarms ---- */
+        alarm_entry_t active[MAX_ACTIVE];
+        int n_active = alarm_ring_get_active(active, MAX_ACTIVE);
 
-    /* Rebuild active list */
-    lv_obj_clean(w->active_list);
-    for (int i = 0; i < n_active; i++) {
-        make_alarm_row(w->active_list, &active[i]);
+        char title_buf[64];
+        snprintf(title_buf, sizeof(title_buf), "%s (%d)", lang_str(STR_ALARM_ACTIVE_TITLE), n_active);
+        lv_label_set_text(w->lbl_active_title, title_buf);
+
+        /* Rebuild active list */
+        lv_obj_clean(w->active_list);
+        for (int i = 0; i < n_active; i++) {
+            make_alarm_row(w->active_list, &active[i]);
+        }
+        if (n_active == 0) {
+            lv_obj_t *empty = lv_label_create(w->active_list);
+            lv_label_set_text(empty, lang_str(STR_ALARM_NONE_ACTIVE));
+            lv_obj_set_style_text_color(empty, COLOR_TEXT_SECONDARY, 0);
+            lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
+        }
+
+        /* ---- History ---- */
+        alarm_entry_t history[MAX_HISTORY];
+        int n_history = alarm_ring_get_history(history, MAX_HISTORY);
+
+        lv_obj_clean(w->history_list);
+        for (int i = 0; i < n_history; i++) {
+            make_alarm_row(w->history_list, &history[i]);
+        }
+        if (n_history == 0) {
+            lv_obj_t *empty = lv_label_create(w->history_list);
+            lv_label_set_text(empty, lang_str(STR_ALARM_NONE_HISTORY));
+            lv_obj_set_style_text_color(empty, COLOR_TEXT_SECONDARY, 0);
+            lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
+        }
     }
-    if (n_active == 0) {
-        lv_obj_t *empty = lv_label_create(w->active_list);
-        lv_label_set_text(empty, "No active alarms");
-        lv_obj_set_style_text_color(empty, COLOR_TEXT_SECONDARY, 0);
-        lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
-    }
 
-    /* ---- History ---- */
-    alarm_entry_t history[MAX_HISTORY];
-    int n_history = alarm_ring_get_history(history, MAX_HISTORY);
-
-    lv_obj_clean(w->history_list);
-    for (int i = 0; i < n_history; i++) {
-        make_alarm_row(w->history_list, &history[i]);
-    }
-    if (n_history == 0) {
-        lv_obj_t *empty = lv_label_create(w->history_list);
-        lv_label_set_text(empty, "No alarm history");
-        lv_obj_set_style_text_color(empty, COLOR_TEXT_SECONDARY, 0);
-        lv_obj_set_style_text_font(empty, UI_FONT_16, 0);
-    }
-
-    /* ---- RESET button visibility ---- */
+    /* RESET button visibility always updates (cheap operation) */
     if (d->state == PLANT_STATE_FAULT) {
         lv_obj_remove_flag(w->btn_reset, LV_OBJ_FLAG_HIDDEN);
     } else {

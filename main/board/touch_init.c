@@ -72,13 +72,21 @@ lv_indev_t *touch_init(lv_display_t *disp)
     ESP_LOGI(TAG, "Initializing touch controller");
 
     /* 1. Инициализация шины I2C (master, 400 кГц) */
-    ESP_ERROR_CHECK(i2c_init());
+    esp_err_t err = i2c_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C init failed: %s", esp_err_to_name(err));
+        return NULL;
+    }
 
     /* 2. Создание I2C panel IO для тач-контроллера GSL3680 */
     esp_lcd_panel_io_handle_t tp_io = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_GSL3680_CONFIG();
     tp_io_cfg.scl_speed_hz = BOARD_TOUCH_I2C_FREQ_HZ; // Установка частоты I2C: 400 кГц
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus, &tp_io_cfg, &tp_io));
+    err = esp_lcd_new_panel_io_i2c(s_i2c_bus, &tp_io_cfg, &tp_io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C panel IO create failed: %s", esp_err_to_name(err));
+        return NULL;
+    }
 
     /* 3. Настройка параметров сенсорного контроллера */
     esp_lcd_touch_config_t tp_cfg = {
@@ -99,7 +107,11 @@ lv_indev_t *touch_init(lv_display_t *disp)
 
     /* 4. Создание хэндла тач-контроллера GSL3680 */
     esp_lcd_touch_handle_t touch = NULL;
-    ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gsl3680(tp_io, &tp_cfg, &touch));
+    err = esp_lcd_touch_new_i2c_gsl3680(tp_io, &tp_cfg, &touch);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "GSL3680 touch create failed: %s", esp_err_to_name(err));
+        return NULL;
+    }
     ESP_LOGI(TAG, "GSL3680 touch controller initialized");
 
     /* 5. Регистрация сенсорного ввода в LVGL (привязка к указанному дисплею) */

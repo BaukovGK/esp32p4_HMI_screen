@@ -27,26 +27,7 @@
 #include <stdio.h>
 #include <math.h>
 
-/* ---- Определения битов DI / DO ---- */
-
-/* Дискретные входы (байт di) -- от модуля Waveshare AI */
-#define DI_SOURCE_LOW (1u << 0)    /* DI1: нижний уровень исходной ёмкости  */
-#define DI_SOURCE_HIGH (1u << 1)   /* DI2: верхний уровень исходной ёмкости */
-#define DI_INTERM_LOW (1u << 2)    /* DI3: нижний уровень промежуточной     */
-#define DI_INTERM_HIGH (1u << 3)   /* DI4: верхний уровень промежуточной    */
-#define DI_PUMP1_RUN (1u << 4)     /* DI5: подтверждение работы насоса 1    */
-#define DI_PUMP2_RUN (1u << 5)     /* DI6: подтверждение работы насоса 2    */
-#define DI_PUMP3_RUN (1u << 6)     /* DI7: подтверждение работы насоса 3    */
-#define DI_PERMEATE_HIGH (1u << 7) /* DI8: верхний уровень ёмкости пермеата */
-
-/* Дискретные выходы (байт do_bits) */
-#define DO_PUMP1 (1u << 0)   // Подающий насос
-#define DO_PUMP2 (1u << 1)   // Насос 1й ступени
-#define DO_PUMP3 (1u << 2)   // Насос 2й ступени
-#define DO_HEATER (1u << 3)  // Нагреватель
-#define DO_DOSER (1u << 4)   // Дозатор
-#define DO_VALVE1 (1u << 5)  // Клапан 1
-#define DO_VALVE2 (1u << 6)  // Клапан 2
+/* DI/DO bitmask defines are in plant_data.h (included via scr_mnemonic.h) */
 
 /* ---- Константы разметки схемы ---- */
 
@@ -357,19 +338,32 @@ static lv_obj_t *make_mode_btn(lv_obj_t *parent, int32_t x, int32_t y,
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+}
+
 /** Создаёт полную мнемосхему: ёмкости, насосы, мембраны, трубопроводы, датчики, кнопки. */
 lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
 {
     /* Root container - fills content area */
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     mnemonic_widgets_t *w = lv_malloc(sizeof(mnemonic_widgets_t));
     lv_memzero(w, sizeof(mnemonic_widgets_t));
+    if (!w) return cont;
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /*
      * ============================================================
@@ -447,7 +441,11 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
                        60, PIPE_RECYCLE_THICK);
         /* "Дренаж" label */
         lv_obj_t *lbl_drain = lv_label_create(cont);
-        lv_label_set_text(lbl_drain, LV_SYMBOL_RIGHT " Дренаж");
+        {
+            char drain_buf[32];
+            snprintf(drain_buf, sizeof(drain_buf), LV_SYMBOL_RIGHT " %s", lang_str(STR_LBL_DRAIN));
+            lv_label_set_text(lbl_drain, drain_buf);
+        }
         lv_obj_set_pos(lbl_drain, m1_cx + 72, conc_y + PIPE_RECYCLE_THICK +6);
         lv_obj_set_style_text_color(lbl_drain, PIPE_RECYCLE_CLR, 0);
         lv_obj_set_style_text_font(lbl_drain, UI_FONT_12, 0);
@@ -467,13 +465,13 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
 
         /* Recycle labels */
         lv_obj_t *lbl_q2 = lv_label_create(cont);
-        lv_label_set_text(lbl_q2, "Q2 рецикл");
+        lv_label_set_text(lbl_q2, lang_str(STR_LBL_RECYCLE_Q2));
         lv_obj_set_pos(lbl_q2, rejoin_x + 20, conc_y + PIPE_RECYCLE_THICK + 2);
         lv_obj_set_style_text_color(lbl_q2, PIPE_RECYCLE_CLR, 0);
         lv_obj_set_style_text_font(lbl_q2, UI_FONT_12, 0);
 
         lv_obj_t *lbl_q4r = lv_label_create(cont);
-        lv_label_set_text(lbl_q4r, "Q4 рецикл");
+        lv_label_set_text(lbl_q4r, lang_str(STR_LBL_RECYCLE_Q4));
         lv_obj_set_pos(lbl_q4r, rejoin2_x + 20, conc_y + PIPE_RECYCLE_THICK + 2);
         lv_obj_set_style_text_color(lbl_q4r, PIPE_RECYCLE_CLR, 0);
         lv_obj_set_style_text_font(lbl_q4r, UI_FONT_12, 0);
@@ -569,7 +567,7 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     int32_t btn_w = 230;
     /* 5 buttons: 5*230 + 4*16 = 1214, margin = (1280-1214)/2 = 33 */
     int32_t btn_x0 = 33;
-    int32_t btn_y = 700 - 50 - btn_h; /* 50px from bottom edge */
+    int32_t btn_y = UI_CONTENT_HEIGHT - 50 - btn_h; /* 50px from bottom edge */
 
     w->btn_start = make_mode_btn(cont, btn_x0, btn_y, btn_w, btn_h,
                                  lang_str(STR_BTN_START_AUTO),
@@ -654,11 +652,12 @@ static void set_tank_fill(lv_obj_t *fill, lv_obj_t *frame, bool low, bool high)
  * Читает: di, do_bits, pressure[], temperature, flow[], conductivity[],
  *          telemetry, doser, state.
  */
-void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
+void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     mnemonic_widgets_t *w = (mnemonic_widgets_t *)lv_obj_get_user_data(container);
     if (!w)
         return;
+    if (!dirty) return;
 
     char buf[48];
     uint8_t di = d->di;

@@ -51,6 +51,7 @@ idf_component_register(
         esp_lcd
         esp_lcd_jd9365
         esp_lcd_touch_gsl3680
+        esp_lvgl_port
         driver
         esp_eth
         nvs_flash

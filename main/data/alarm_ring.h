@@ -13,10 +13,13 @@
 #include "plant_data.h"
 
 /** Размер кольцевого буфера (максимум хранимых записей аварий) */
-#define ALARM_RING_SIZE 16
+#define ALARM_RING_SIZE 32  /* Хранит до 32 записей аварий в кольцевом буфере */
 
 /** Инициализация кольцевого буфера: обнуление, сброс указателей, создание мьютекса */
 void             alarm_ring_init(void);
+
+/** Очистка буфера аварий: обнуление данных, сброс указателей и счётчика поколений */
+void             alarm_ring_clear(void);
 
 /**
  * Добавить запись аварии в кольцевой буфер.
@@ -52,3 +55,11 @@ int              alarm_ring_active_count(void);
  * @return наивысшая категория (CRITICAL > ALARM > WARNING > INFO)
  */
 alarm_category_t alarm_ring_worst_active(void);
+
+/**
+ * Возвращает монотонно растущий счётчик изменений (generation).
+ * Инкрементируется при каждом вызове alarm_ring_push().
+ * Используется UI для определения, нужно ли перестраивать виджеты.
+ * @return текущее значение generation counter
+ */
+uint32_t         alarm_ring_generation(void);

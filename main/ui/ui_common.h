@@ -30,6 +30,15 @@ lv_obj_t *ui_alarm_bar_create(lv_obj_t *parent);
  */
 void      ui_alarm_bar_update(lv_obj_t *bar, const plant_data_t *data);
 
+/**
+ * Установка флага устаревших данных для панели аварий.
+ * Когда stale == true, панель аварий показывает "НЕТ СВЯЗИ" вместо текущих данных.
+ *
+ * @param bar указатель на объект панели (не используется -- работает через static ctx)
+ * @param stale true если данные устарели (нет связи с контроллером)
+ */
+void      ui_alarm_bar_set_stale(lv_obj_t *bar, bool stale);
+
 /* --- Навигационная панель (нижняя полоса 60px) --- */
 
 /** Тип callback-функции навигации -- вызывается при выборе вкладки */

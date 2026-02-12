@@ -113,21 +113,34 @@ static lv_obj_t *make_kv_row(lv_obj_t *panel, int32_t y_offset,
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+}
+
 /** Создаёт экран диагностики: панели системы, Modbus и стеков задач. */
 lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     diag_widgets_t *w = lv_malloc(sizeof(diag_widgets_t));
     lv_memzero(w, sizeof(diag_widgets_t));
+    if (!w) return cont;
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- System panel (top-left) ---- */
-    lv_obj_t *sys = make_info_panel(cont, 20, 16, 380, 200, "System");
+    lv_obj_t *sys = make_info_panel(cont, 20, 16, 380, 200, lang_str(STR_DIAG_SYSTEM));
 
     w->lbl_heap_free = make_kv_row(sys, 30, lang_str(STR_DIAG_HEAP_FREE), "---");
     w->lbl_heap_min  = make_kv_row(sys, 56, lang_str(STR_DIAG_HEAP_MIN),  "---");
@@ -139,19 +152,19 @@ lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
 
     /* Table header */
     lv_obj_t *hdr_name = lv_label_create(mb);
-    lv_label_set_text(hdr_name, "Device");
+    lv_label_set_text(hdr_name, lang_str(STR_HDR_DEVICE));
     lv_obj_set_pos(hdr_name, 0, 30);
     lv_obj_set_style_text_color(hdr_name, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(hdr_name, UI_FONT_14, 0);
 
     lv_obj_t *hdr_status = lv_label_create(mb);
-    lv_label_set_text(hdr_status, "Status");
+    lv_label_set_text(hdr_status, lang_str(STR_HDR_STATUS));
     lv_obj_set_pos(hdr_status, 200, 30);
     lv_obj_set_style_text_color(hdr_status, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(hdr_status, UI_FONT_14, 0);
 
     lv_obj_t *hdr_err = lv_label_create(mb);
-    lv_label_set_text(hdr_err, "Errors");
+    lv_label_set_text(hdr_err, lang_str(STR_HDR_ERRORS));
     lv_obj_set_pos(hdr_err, 350, 30);
     lv_obj_set_style_text_color(hdr_err, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(hdr_err, UI_FONT_14, 0);
@@ -178,17 +191,17 @@ lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
     }
 
     /* ---- Task stacks panel (bottom) ---- */
-    lv_obj_t *stk = make_info_panel(cont, 20, 236, 1240, 240, "Task Stack Watermarks");
+    lv_obj_t *stk = make_info_panel(cont, 20, 236, 1240, 240, lang_str(STR_DIAG_TASK_STACKS));
 
     /* Table header */
     lv_obj_t *shdr_name = lv_label_create(stk);
-    lv_label_set_text(shdr_name, "Task");
+    lv_label_set_text(shdr_name, lang_str(STR_HDR_TASK));
     lv_obj_set_pos(shdr_name, 0, 30);
     lv_obj_set_style_text_color(shdr_name, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(shdr_name, UI_FONT_14, 0);
 
     lv_obj_t *shdr_val = lv_label_create(stk);
-    lv_label_set_text(shdr_val, "Free (bytes)");
+    lv_label_set_text(shdr_val, lang_str(STR_HDR_FREE_BYTES));
     lv_obj_set_pos(shdr_val, 200, 30);
     lv_obj_set_style_text_color(shdr_val, COLOR_TEXT_SECONDARY, 0);
     lv_obj_set_style_text_font(shdr_val, UI_FONT_14, 0);
@@ -220,10 +233,11 @@ lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
  * Читает: diagnostics (heap, uptime, modbus_online/errors, stack_*), mqtt_connected.
  * Критичные значения подсвечиваются красным (heap < 32KB, стек < 512B, modbus offline).
  */
-void scr_diagnostics_update(lv_obj_t *container, const plant_data_t *d)
+void scr_diagnostics_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     diag_widgets_t *w = (diag_widgets_t *)lv_obj_get_user_data(container);
     if (!w) return;
+    if (!(dirty & (DIRTY_DIAGNOSTICS | DIRTY_STATE))) return;
 
     char buf[64];
     const diagnostics_t *diag = &d->diagnostics;

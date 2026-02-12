@@ -39,6 +39,8 @@
 // MQTT-клиент для связи с основным контроллером
 #include "mqtt_app.h"
 
+#define ETH_WAIT_TIMEOUT_MS  10000
+
 static const char *TAG = "app_main"; // Тег для логирования через ESP_LOG
 
 /**
@@ -76,6 +78,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Alarm ring initialized");
 
     /* 5. Установка языка интерфейса — русский */
+    /* TODO: загрузить язык из NVS; по умолчанию — русский */
     lang_init(LANG_RU);
     ESP_LOGI(TAG, "Language set to RU");
 
@@ -101,7 +104,7 @@ void app_main(void)
     ESP_LOGI(TAG, "UI initialized");
 
     /* 9. Ожидание получения IP-адреса по Ethernet (таймаут 10 секунд) */
-    ret = eth_wait_for_ip(pdMS_TO_TICKS(10000));
+    ret = eth_wait_for_ip(pdMS_TO_TICKS(ETH_WAIT_TIMEOUT_MS));
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "Ethernet IP acquired");
     } else {

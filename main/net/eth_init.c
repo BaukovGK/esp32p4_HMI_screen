@@ -17,6 +17,7 @@
 #include "driver/gpio.h"
 #include "freertos/event_groups.h"
 #include "sdkconfig.h"
+#include "plant_data.h"
 
 static const char *TAG = "eth";
 
@@ -47,6 +48,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
             break;
         case ETHERNET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Ethernet link down");
+            plant_data_set_mqtt_status(false);
             break;
         case ETHERNET_EVENT_START:
             ESP_LOGI(TAG, "Ethernet started");
@@ -64,6 +66,9 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
         if (s_eth_event_group) {
             xEventGroupSetBits(s_eth_event_group, ETH_GOT_IP_BIT);
         }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_LOST_IP) {
+        ESP_LOGW(TAG, "Lost IP address");
+        plant_data_set_mqtt_status(false);
     }
 }
 
@@ -85,6 +90,7 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
 esp_err_t eth_init(void)
 {
     s_eth_event_group = xEventGroupCreate();
+    configASSERT(s_eth_event_group);
 
     // Инициализация TCP/IP стека
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif init failed");
@@ -94,6 +100,10 @@ esp_err_t eth_init(void)
     /* Создание сетевого интерфейса Ethernet по умолчанию */
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
+    if (!eth_netif) {
+        ESP_LOGE(TAG, "Failed to create netif");
+        return ESP_FAIL;
+    }
 
     /* Конфигурация внутреннего EMAC контроллера ESP32-P4 */
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
@@ -101,12 +111,23 @@ esp_err_t eth_init(void)
     emac_cfg.smi_gpio.mdc_num = CONFIG_ETH_MDC_GPIO;   // GPIO тактирования SMI (MDC)
     emac_cfg.smi_gpio.mdio_num = CONFIG_ETH_MDIO_GPIO; // GPIO данных SMI (MDIO)
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
+    if (!mac) {
+        ESP_LOGE(TAG, "Failed to create MAC");
+        esp_netif_destroy(eth_netif);
+        return ESP_FAIL;
+    }
 
     /* Конфигурация PHY-чипа IP101 */
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
     phy_cfg.phy_addr = CONFIG_ETH_PHY_ADDR;            // Адрес PHY на шине SMI
     phy_cfg.reset_gpio_num = CONFIG_ETH_PHY_RST_GPIO;  // GPIO аппаратного сброса PHY
     esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_cfg);
+    if (!phy) {
+        ESP_LOGE(TAG, "Failed to create PHY");
+        mac->del(mac);
+        esp_netif_destroy(eth_netif);
+        return ESP_FAIL;
+    }
 
     /* Установка Ethernet-драйвера */
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
@@ -122,6 +143,8 @@ esp_err_t eth_init(void)
                         eth_event_handler, NULL), TAG, "ETH event handler failed");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
                         eth_event_handler, NULL), TAG, "IP event handler failed");
+    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP,
+                        eth_event_handler, NULL), TAG, "IP lost event handler failed");
 
     /* Запуск Ethernet-драйвера */
     ESP_RETURN_ON_ERROR(esp_eth_start(eth_handle), TAG, "eth start failed");
@@ -143,6 +166,10 @@ esp_err_t eth_init(void)
  */
 esp_err_t eth_wait_for_ip(TickType_t timeout_ticks)
 {
+    if (!s_eth_event_group) {
+        ESP_LOGE(TAG, "Event group not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
     EventBits_t bits = xEventGroupWaitBits(s_eth_event_group, ETH_GOT_IP_BIT,
                                            pdFALSE, pdTRUE, timeout_ticks);
     if (bits & ETH_GOT_IP_BIT) {

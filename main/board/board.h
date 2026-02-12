@@ -13,6 +13,7 @@
 #ifndef LVGL_LIVE_PREVIEW
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "driver/ledc.h"
 #include "soc/soc_caps.h"
 #else
 /* Заглушки GPIO для режима предпросмотра LVGL (без реального железа) */
@@ -24,13 +25,13 @@ typedef int gpio_num_t;
 #define GPIO_NUM_23  23
 #define GPIO_NUM_27  27
 #define I2C_NUM_0    0
+#define LEDC_TIMER_10_BIT  10
 #endif
 
 /* ---- Дисплей MIPI DSI (контроллер JD9365, нативное разрешение 800x1280 портрет) ---- */
 #define BOARD_LCD_H_RES             800     // Горизонтальное разрешение (нативное, до поворота)
 #define BOARD_LCD_V_RES             1280    // Вертикальное разрешение (нативное, до поворота)
 #define BOARD_LCD_MIPI_DSI_LANES    2       // Количество линий данных MIPI DSI
-#define BOARD_LCD_MIPI_LANE_BITRATE 1000    // Скорость линии MIPI DSI, Мбит/с
 #define BOARD_LCD_COLOR_SPACE       ESP_LCD_COLOR_SPACE_RGB // Цветовое пространство RGB
 #define BOARD_LCD_BPP               16      // Глубина цвета: RGB565 (16 бит на пиксель)
 #define BOARD_LCD_BIGENDIAN         0       // Порядок байт: little-endian
@@ -52,6 +53,11 @@ typedef int gpio_num_t;
 /* ---- Ландшафтный режим (после программного поворота на 270 градусов) ---- */
 #define BOARD_DISP_H_RES            1280    // Горизонтальное разрешение в ландшафтном режиме
 #define BOARD_DISP_V_RES            800     // Вертикальное разрешение в ландшафтном режиме
+
+/* ---- ШИМ-подсветка (LEDC) ---- */
+#define BOARD_LCD_LEDC_CH        0
+#define BOARD_LCD_LEDC_FREQ_HZ   20000
+#define BOARD_LCD_LEDC_DUTY_BITS LEDC_TIMER_10_BIT
 
 /* ---- Буфер отрисовки LVGL ---- */
 #define BOARD_LCD_DRAW_BUFF_LINES   80      // Количество строк в буфере отрисовки

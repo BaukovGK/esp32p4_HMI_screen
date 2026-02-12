@@ -114,12 +114,23 @@ static void make_row(lv_obj_t *parent, const char *name,
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+}
+
 /** Создаёт прокручиваемую таблицу параметров с заголовками столбцов и секциями. */
 lv_obj_t *scr_parameters_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(cont, 16, 0);
@@ -130,6 +141,8 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent)
 
     param_widgets_t *w = lv_malloc(sizeof(param_widgets_t));
     lv_memzero(w, sizeof(param_widgets_t));
+    if (!w) return cont;
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- Column headers ---- */
     lv_obj_t *hdr_row = lv_obj_create(cont);
@@ -140,7 +153,7 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent)
     lv_obj_set_style_pad_column(hdr_row, 8, 0);
     lv_obj_remove_flag(hdr_row, LV_OBJ_FLAG_SCROLLABLE);
 
-    const char *col_names[] = {"Parameter", "Value", "Extra", "Status"};
+    const char *col_names[] = {lang_str(STR_HDR_PARAMETER), lang_str(STR_HDR_VALUE), lang_str(STR_HDR_EXTRA), lang_str(STR_HDR_STATUS)};
     int col_widths[] = {140, 160, 160, 100};
     for (int i = 0; i < 4; i++) {
         lv_obj_t *h = lv_label_create(hdr_row);
@@ -179,12 +192,13 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent)
     }
 
     /* ---- Calculated section ---- */
-    make_section_header(cont, "Calculated");
-    static const char *calc_names[] = {
-        "Filter dP", "Stage1 Feed", "Recovery2", "Recovery sys", "Sel1", "Sel2"
+    make_section_header(cont, lang_str(STR_CALC_SECTION));
+    static const str_id_t calc_ids[] = {
+        STR_CALC_FILTER_DP, STR_CALC_STAGE1_FEED, STR_CALC_RECOVERY2,
+        STR_CALC_RECOVERY_SYS, STR_CALC_SEL1, STR_CALC_SEL2
     };
     for (int i = 0; i < ROWS_CALC; i++) {
-        make_row(cont, calc_names[i], &w->lbl_calc_val[i], NULL, NULL);
+        make_row(cont, lang_str(calc_ids[i]), &w->lbl_calc_val[i], NULL, NULL);
     }
 
     lv_obj_set_user_data(cont, w);
@@ -198,10 +212,11 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent)
  * Для каждого датчика: если fault -- показывает "---" и статус "Обрыв датчика";
  * иначе -- форматированное значение и статус "OK".
  */
-void scr_parameters_update(lv_obj_t *container, const plant_data_t *d)
+void scr_parameters_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     param_widgets_t *w = (param_widgets_t *)lv_obj_get_user_data(container);
     if (!w) return;
+    if (!(dirty & (DIRTY_ANALOG | DIRTY_FLOW | DIRTY_CONDUCTIVITY | DIRTY_TELEMETRY))) return;
 
     char buf[48];
 

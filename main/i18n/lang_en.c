@@ -137,4 +137,60 @@ const char *lang_en_strings[STR_COUNT] = {
     [STR_UNIT_SECONDS] = "s",
     [STR_UNIT_MINUTES] = "min",
     [STR_UNIT_BYTES]   = "B",
+
+    /* Column headers */
+    [STR_HDR_PARAMETER]     = "Parameter",
+    [STR_HDR_VALUE]         = "Value",
+    [STR_HDR_EXTRA]         = "Extra",
+    [STR_HDR_STATUS]        = "Status",
+
+    /* Calculated parameters */
+    [STR_CALC_FILTER_DP]    = "Filter dP",
+    [STR_CALC_STAGE1_FEED]  = "Stage 1 feed",
+    [STR_CALC_RECOVERY2]    = "Recovery 2",
+    [STR_CALC_RECOVERY_SYS] = "Recovery sys",
+    [STR_CALC_SEL1]         = "Selectivity 1",
+    [STR_CALC_SEL2]         = "Selectivity 2",
+    [STR_CALC_SECTION]      = "Calculated",
+
+    /* Diagnostics */
+    [STR_DIAG_SYSTEM]       = "System",
+    [STR_DIAG_TASK_STACKS]  = "Task Stack Watermarks",
+    [STR_HDR_DEVICE]        = "Device",
+    [STR_HDR_ERRORS]        = "Errors",
+    [STR_HDR_TASK]          = "Task",
+    [STR_HDR_FREE_BYTES]    = "Free (bytes)",
+
+    /* Mnemonic */
+    [STR_LBL_DRAIN]         = "Drain",
+    [STR_LBL_RECYCLE_Q2]    = "Q2 recycle",
+    [STR_LBL_RECYCLE_Q4]    = "Q4 recycle",
+
+    /* Settings fields */
+    [STR_SET_P1_MAX]        = "P1 max (bar)",
+    [STR_SET_P3_MAX]        = "P3 max (bar)",
+    [STR_SET_P4_MAX]        = "P4 max (bar)",
+    [STR_SET_FILTER_DP_WARN]= "Filter dP warn (bar)",
+    [STR_SET_RUN_TIME]      = "Run time (min)",
+    [STR_SET_CYCLE_TIME]    = "Cycle time (min)",
+    [STR_SET_TARGET_TEMP]   = "Target temp (\xC2\xB0" "C)",
+    [STR_SET_MAX_TEMP]      = "Max temp (\xC2\xB0" "C)",
+    [STR_SET_OVERSHOOT]     = "Overshoot (\xC2\xB0" "C)",
+    [STR_SET_HYSTERESIS]    = "Hysteresis (\xC2\xB0" "C)",
+    [STR_SET_HEAT_TIMEOUT]  = "Heat timeout (min)",
+    [STR_SET_SUPPLY_TIME]   = "Supply time (min)",
+    [STR_SET_DRAIN_TIME]    = "Drain time (min)",
+    [STR_SET_PUMP_CONFIRM]  = "Pump confirm (ms)",
+    [STR_SET_PUMP_RAMP]     = "Pump ramp (ms)",
+    [STR_WASH_TARGET_INFO]  = "Target: %.1f \xC2\xB0" "C  |  Max: %.1f \xC2\xB0" "C",
+
+    /* Alarm screen */
+    [STR_ALARM_ACTIVE_TITLE]  = "Active Alarms",
+    [STR_ALARM_HISTORY_TITLE] = "Alarm History",
+    [STR_ALARM_NONE_ACTIVE]   = "No active alarms",
+    [STR_ALARM_NONE_HISTORY]  = "No alarm history",
+    [STR_ALARM_ACTIVE_BADGE]  = "ACTIVE",
 };
+
+_Static_assert(sizeof(lang_en_strings) / sizeof(lang_en_strings[0]) == STR_COUNT,
+               "lang_en_strings size mismatch with str_id_t");

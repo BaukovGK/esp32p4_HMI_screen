@@ -80,6 +80,14 @@ static int json_get_int(const cJSON *obj, const char *key, int def)
     return item->valueint;
 }
 
+/** Получение int64 значения из JSON (через valuedouble для большого диапазона). */
+static int64_t json_get_int64(const cJSON *obj, const char *key, int64_t def)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!item || !cJSON_IsNumber(item)) return def;
+    return (int64_t)item->valuedouble;
+}
+
 /**
  * Извлечение строкового значения из JSON-объекта по ключу.
  *
@@ -340,7 +348,7 @@ static void parse_diagnostics(const cJSON *json)
     diagnostics_t diag = {0};
     diag.heap_free = (uint32_t)json_get_int(json, "heap_free", 0);
     diag.heap_min  = (uint32_t)json_get_int(json, "heap_min", 0);
-    diag.uptime_s  = (int64_t)json_get_int(json, "uptime_s", 0);
+    diag.uptime_s  = json_get_int64(json, "uptime_s", 0);
     diag.wdt_stale = (uint32_t)json_get_int(json, "wdt_stale", 0);
 
     // Парсинг вложенного объекта остатков стеков задач
@@ -404,7 +412,7 @@ static void parse_alarm(const cJSON *json)
 {
     alarm_entry_t entry = {0};
     entry.id = (uint32_t)json_get_int(json, "id", 0);
-    entry.ts = (int64_t)json_get_int(json, "ts", 0);
+    entry.ts = json_get_int64(json, "ts", 0);
     entry.cat = parse_alarm_cat(json_get_string(json, "cat", "INFO"));
     entry.value = json_get_float(json, "value", 0);
     entry.active = json_get_bool(json, "active", true);
@@ -412,13 +420,15 @@ static void parse_alarm(const cJSON *json)
     const char *code = json_get_string(json, "code", "UNKNOWN");
     strncpy(entry.code, code, sizeof(entry.code) - 1);
 
-    // Добавление аварии в кольцевой буфер
-    alarm_ring_push(&entry);
-
-    /* Установка флага "грязных" данных для обновления экрана аварий */
+    /* Добавление аварии в кольцевой буфер и установка dirty-флага.
+     * Порядок захвата мьютексов: plant_data -> alarm_ring (совпадает с UI-потоком). */
     if (plant_data_lock(10)) {
+        alarm_ring_push(&entry);
         plant_data_get_mutable()->dirty_flags |= DIRTY_ALARMS;
         plant_data_unlock();
+    } else {
+        /* Fallback: если не удалось захватить мьютекс, всё равно добавляем аварию */
+        alarm_ring_push(&entry);
     }
 }
 
@@ -444,7 +454,8 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
                           const char *data, int data_len)
 {
     // Копирование топика в локальный буфер с нуль-терминатором
-    char topic_buf[128];
+    #define MQTT_TOPIC_BUF_SIZE 128
+    char topic_buf[MQTT_TOPIC_BUF_SIZE];
     int len = (topic_len < (int)sizeof(topic_buf) - 1) ? topic_len : (int)sizeof(topic_buf) - 1;
     memcpy(topic_buf, topic, len);
     topic_buf[len] = '\0';

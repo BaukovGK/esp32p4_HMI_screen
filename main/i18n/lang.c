@@ -66,7 +66,9 @@ lang_id_t lang_get(void)
  */
 const char *lang_str(str_id_t id)
 {
-    if (id >= STR_COUNT) return "???";           // проверка границ
-    const char *s = s_tables[s_current_lang][id]; // выборка из текущей таблицы
-    return s ? s : "???";                         // защита от NULL
+    if (id >= STR_COUNT) return "???";
+    const char *const *tbl = s_tables[s_current_lang];
+    if (!tbl) return "???";
+    const char *s = tbl[id];
+    return s ? s : "???";
 }
