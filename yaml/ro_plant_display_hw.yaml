@@ -1,0 +1,44 @@
+# =============================================================================
+# RO Plant - Display Hardware Configuration
+# JD9365 MIPI DSI 1280x800 (landscape after rotation)
+# =============================================================================
+
+# --- SPI for Touch ---
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+
+# --- I2C for Touch ---
+i2c:
+  sda: GPIO8
+  scl: GPIO9
+  scan: true
+  frequency: 400kHz
+
+# --- Touchscreen ---
+touchscreen:
+  - platform: gt911   # adjust for GSL3680 or actual controller
+    id: my_touchscreen
+    interrupt_pin: GPIO4
+    reset_pin: GPIO5
+
+# --- Display ---
+# NOTE: MIPI DSI displays are not yet natively supported in ESPHome.
+# This is a placeholder configuration. For actual deployment, you would need
+# either a custom component or use an SPI/I2C display that ESPHome supports.
+# Common alternatives: ILI9xxx SPI displays, ST7789, etc.
+#
+# For the full 1280x800 experience, consider using the LVGL component
+# with a supported display driver.
+
+display:
+  - platform: lvgl    # ESPHome LVGL display component
+    id: main_display
+    dimensions:
+      width: 1280
+      height: 800
+    update_interval: 250ms
+    # auto_clear_enabled: false
+    touchscreen_id: my_touchscreen
+    pages: !include ro_plant_screens.yaml

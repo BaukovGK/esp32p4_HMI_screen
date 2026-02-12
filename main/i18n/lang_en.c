@@ -1,5 +1,17 @@
+/**
+ * @file lang_en.c
+ * @brief Таблица строк на английском языке.
+ *
+ * Массив lang_en_strings[] содержит переводы всех строк интерфейса.
+ * Индексация -- по значениям перечисления str_id_t (lang_strings.h).
+ *
+ * При добавлении новой строки: добавить элемент с designated initializer
+ * в соответствующую секцию, например: [STR_NEW_ID] = "New string",
+ * и обязательно добавить аналогичный перевод в lang_ru.c.
+ */
 #include "lang.h"
 
+// Таблица английских строк -- вспомогательный язык интерфейса
 const char *lang_en_strings[STR_COUNT] = {
     /* Mode names */
     [STR_MODE_IDLE]     = "IDLE",

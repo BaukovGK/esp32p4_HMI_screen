@@ -1,18 +1,44 @@
+/**
+ * @file plant_data.c
+ * @brief Реализация централизованного хранилища данных установки.
+ *
+ * Единственный экземпляр plant_data_t (s_data) хранится как статическая
+ * переменная модуля. Доступ защищён мьютексом FreeRTOS (s_mutex).
+ *
+ * Паттерн доступа:
+ *   - MQTT-задача вызывает потокобезопасные сеттеры (plant_data_set_*),
+ *     которые самостоятельно захватывают/освобождают мьютекс.
+ *   - UI-задача вызывает plant_data_lock(), затем читает данные через
+ *     plant_data_get(), проверяет dirty_flags, и вызывает plant_data_unlock().
+ *
+ * Файл исключается из сборки LVGL-превью (#ifndef LVGL_LIVE_PREVIEW).
+ */
+#ifndef LVGL_LIVE_PREVIEW
 #include "plant_data.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
 #include <string.h>
 
+// Единственный экземпляр данных установки (статический, модульная область видимости)
 static plant_data_t s_data;
+
+// Мьютекс для защиты s_data от одновременного доступа из разных задач
 static SemaphoreHandle_t s_mutex = NULL;
 
+/**
+ * Инициализация хранилища данных.
+ * Обнуляет структуру, устанавливает NAN для аналоговых каналов
+ * (чтобы UI отображал "---" до получения первых данных),
+ * заполняет уставки значениями по умолчанию и создаёт мьютекс.
+ * Вызывается один раз при старте приложения до запуска задач MQTT и UI.
+ */
 void plant_data_init(void)
 {
     memset(&s_data, 0, sizeof(s_data));
     s_data.state = PLANT_STATE_UNKNOWN;
 
-    /* Initialize analog values to NAN */
+    // Инициализация аналоговых значений в NAN (нет данных)
     for (int i = 0; i < 4; i++) {
         s_data.pressure[i].value = NAN;
         s_data.flow[i].flow = NAN;
@@ -24,7 +50,7 @@ void plant_data_init(void)
         s_data.conductivity[i].temperature = NAN;
     }
 
-    /* Default settings */
+    // Уставки по умолчанию (до получения актуальных от контроллера)
     s_data.set_pressure = (settings_pressure_t){
         .p1_max = 5.5f, .p3_max = 35.0f, .p4_max = 8.0f, .filter_dp_warn = 1.0f
     };
@@ -40,30 +66,54 @@ void plant_data_init(void)
         .pump_confirm_ms = 3000, .pump_ramp_ms = 15000
     };
 
+    // Создание мьютекса; configASSERT остановит систему если памяти не хватило
     s_mutex = xSemaphoreCreateMutex();
     configASSERT(s_mutex);
 }
 
+/**
+ * Захват мьютекса с таймаутом (для UI-задачи).
+ * @param timeout_ms максимальное время ожидания в миллисекундах
+ * @return true если мьютекс успешно захвачен
+ */
 bool plant_data_lock(uint32_t timeout_ms)
 {
     return xSemaphoreTake(s_mutex, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
 }
 
+/** Освобождение мьютекса (парный вызов к plant_data_lock) */
 void plant_data_unlock(void)
 {
     xSemaphoreGive(s_mutex);
 }
 
+/**
+ * Получение указателя на данные только для чтения.
+ * ВАЖНО: вызывать только между plant_data_lock/plant_data_unlock!
+ * Возвращает указатель на статическую структуру s_data.
+ */
 const plant_data_t *plant_data_get(void)
 {
     return &s_data;
 }
 
+/**
+ * Получение мутабельного указателя на данные.
+ * ВАЖНО: вызывать только между plant_data_lock/plant_data_unlock!
+ * Используется для прямой модификации (например, настроек из UI).
+ */
 plant_data_t *plant_data_get_mutable(void)
 {
     return &s_data;
 }
 
+/**
+ * Атомарное чтение и сброс грязных флагов.
+ * ВАЖНО: вызывать только между plant_data_lock/plant_data_unlock!
+ * UI-задача вызывает эту функцию, чтобы узнать какие данные обновились,
+ * и затем перерисовывает только соответствующие виджеты.
+ * @return битовая маска флагов, установленных с прошлого вызова
+ */
 uint32_t plant_data_get_and_clear_dirty(void)
 {
     uint32_t flags = s_data.dirty_flags;
@@ -71,8 +121,14 @@ uint32_t plant_data_get_and_clear_dirty(void)
     return flags;
 }
 
-/* ---- Thread-safe setters ---- */
+/* ---- Потокобезопасные сеттеры (вызываются из задачи MQTT) ---- */
+/*
+ * Каждый сеттер самостоятельно захватывает мьютекс (portMAX_DELAY = ждать бесконечно),
+ * записывает данные, устанавливает соответствующий dirty-бит,
+ * обновляет метку времени последнего сообщения и освобождает мьютекс.
+ */
 
+/** Установить состояние автоматики, подсостояния и флаги аварий */
 void plant_data_set_state(plant_state_t state, auto_sub_state_t asub,
                           wash_sub_state_t wsub, uint32_t fault_flags)
 {
@@ -82,10 +138,11 @@ void plant_data_set_state(plant_state_t state, auto_sub_state_t asub,
     s_data.wash_sub = wsub;
     s_data.fault_flags = fault_flags;
     s_data.dirty_flags |= DIRTY_STATE;
-    s_data.last_msg_time_us = esp_timer_get_time();
+    s_data.last_msg_time_us = esp_timer_get_time(); // метка для определения потери связи
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить состояние дискретных входов и выходов */
 void plant_data_set_io(uint8_t di, uint8_t do_bits)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -96,9 +153,10 @@ void plant_data_set_io(uint8_t di, uint8_t do_bits)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить значение датчика давления по индексу (0=P1 .. 3=P4) */
 void plant_data_set_pressure(int idx, float value, bool fault)
 {
-    if (idx < 0 || idx >= 4) return;
+    if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_data.pressure[idx].value = value;
     s_data.pressure[idx].fault = fault;
@@ -107,6 +165,7 @@ void plant_data_set_pressure(int idx, float value, bool fault)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить значение датчика температуры */
 void plant_data_set_temperature(float value, bool fault)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -117,9 +176,10 @@ void plant_data_set_temperature(float value, bool fault)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить данные расходомера по индексу (0=Q1 .. 3=Q4) */
 void plant_data_set_flow(int idx, float flow, float volume, bool ok)
 {
-    if (idx < 0 || idx >= 4) return;
+    if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_data.flow[idx].flow = flow;
     s_data.flow[idx].volume = volume;
@@ -129,9 +189,10 @@ void plant_data_set_flow(int idx, float flow, float volume, bool ok)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить данные кондуктометра по индексу (0=s1 .. 2=s3) */
 void plant_data_set_conductivity(int idx, float cond, float temp, bool ok)
 {
-    if (idx < 0 || idx >= 3) return;
+    if (idx < 0 || idx >= 3) return; // защита от выхода за границы массива
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_data.conductivity[idx].conductivity = cond;
     s_data.conductivity[idx].temperature = temp;
@@ -141,6 +202,7 @@ void plant_data_set_conductivity(int idx, float cond, float temp, bool ok)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить расчётную телеметрию (копирование всей структуры) */
 void plant_data_set_telemetry(const telemetry_t *tel)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -150,6 +212,7 @@ void plant_data_set_telemetry(const telemetry_t *tel)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить состояние блокировок (флаги, аварийная кнопка, предупреждение фильтра) */
 void plant_data_set_interlocks(uint32_t flags, bool estop, bool filter_warn)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -161,6 +224,7 @@ void plant_data_set_interlocks(uint32_t flags, bool estop, bool filter_warn)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить состояние дозатора антискаланта */
 void plant_data_set_doser(doser_state_t state, bool enabled)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -171,6 +235,7 @@ void plant_data_set_doser(doser_state_t state, bool enabled)
     xSemaphoreGive(s_mutex);
 }
 
+/** Установить диагностику контроллера (копирование всей структуры) */
 void plant_data_set_diagnostics(const diagnostics_t *diag)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -180,6 +245,11 @@ void plant_data_set_diagnostics(const diagnostics_t *diag)
     xSemaphoreGive(s_mutex);
 }
 
+/**
+ * Установить статус MQTT-соединения.
+ * Не обновляет last_msg_time_us, так как это не данные от контроллера,
+ * а локальный статус сетевого подключения HMI-панели.
+ */
 void plant_data_set_mqtt_status(bool connected)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -187,3 +257,4 @@ void plant_data_set_mqtt_status(bool connected)
     s_data.dirty_flags |= DIRTY_STATE;
     xSemaphoreGive(s_mutex);
 }
+#endif /* !LVGL_LIVE_PREVIEW */

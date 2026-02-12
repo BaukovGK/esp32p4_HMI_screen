@@ -1,17 +1,76 @@
+/**
+ * @file ui_common.h
+ * @brief Общие компоненты UI -- панель аварий, навигация, форматирование.
+ *
+ * Предоставляет переиспользуемые виджеты и вспомогательные функции,
+ * используемые всеми экранами интерфейса.
+ */
 #pragma once
 
 #include "lvgl.h"
 #include "plant_data.h"
 
-/* Alarm bar (40px top strip) */
+/* --- Панель аварий (верхняя полоса 40px) --- */
+
+/**
+ * Создание панели аварий в верхней части экрана.
+ * Содержит: режим работы, текст аварии (бегущая строка), статус MQTT, кнопка языка.
+ *
+ * @param parent родительский объект (активный экран LVGL)
+ * @return указатель на созданный объект панели
+ */
 lv_obj_t *ui_alarm_bar_create(lv_obj_t *parent);
+
+/**
+ * Обновление панели аварий по текущим данным установки.
+ * Обновляет текст режима (с подрежимами), текст аварий и статус MQTT.
+ *
+ * @param bar указатель на объект панели (не используется -- работает через static ctx)
+ * @param data указатель на данные установки (внутри lock/unlock)
+ */
 void      ui_alarm_bar_update(lv_obj_t *bar, const plant_data_t *data);
 
-/* Navigation bar (60px bottom strip) */
+/* --- Навигационная панель (нижняя полоса 60px) --- */
+
+/** Тип callback-функции навигации -- вызывается при выборе вкладки */
 typedef void (*nav_cb_t)(int screen_id);
+
+/**
+ * Создание навигационной панели с 6 кнопками-вкладками.
+ *
+ * @param parent родительский объект (активный экран LVGL)
+ * @param on_select callback при нажатии на вкладку
+ * @return указатель на созданный объект панели
+ */
 lv_obj_t *ui_nav_bar_create(lv_obj_t *parent, nav_cb_t on_select);
+
+/**
+ * Установка активной вкладки навигации (подсветка).
+ *
+ * @param bar указатель на объект панели (не используется -- работает через static ctx)
+ * @param screen_id индекс активного экрана (0..5)
+ */
 void      ui_nav_bar_set_active(lv_obj_t *bar, int screen_id);
 
-/* Formatting helpers */
+/* --- Вспомогательные функции форматирования --- */
+
+/**
+ * Форматирование вещественного числа с единицей измерения.
+ * При NaN выводит "--- <unit>".
+ *
+ * @param buf      буфер для результата
+ * @param len      размер буфера
+ * @param val      значение (может быть NAN)
+ * @param decimals количество знаков после запятой
+ * @param unit     строка единицы измерения (может быть NULL)
+ */
 void ui_fmt_float(char *buf, size_t len, float val, int decimals, const char *unit);
+
+/**
+ * Форматирование времени работы (uptime) в формат "Xd HH:MM:SS" или "HH:MM:SS".
+ *
+ * @param buf     буфер для результата
+ * @param len     размер буфера
+ * @param seconds время в секундах
+ */
 void ui_fmt_uptime(char *buf, size_t len, int64_t seconds);

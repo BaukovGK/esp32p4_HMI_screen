@@ -1,0 +1,528 @@
+# =============================================================================
+# RO Plant - MQTT Sensors & Text Sensors
+# All data received from PLC via MQTT
+# =============================================================================
+
+# --- Analog Sensors ---
+sensor:
+  # Pressure sensors P1-P4
+  - platform: mqtt_subscribe
+    name: "Pressure P1"
+    id: pressure_p1
+    topic: "ro_plant/status/analog/p0"
+    accuracy_decimals: 2
+    unit_of_measurement: "bar"
+    icon: "mdi:gauge"
+
+  - platform: mqtt_subscribe
+    name: "Pressure P2"
+    id: pressure_p2
+    topic: "ro_plant/status/analog/p1"
+    accuracy_decimals: 2
+    unit_of_measurement: "bar"
+    icon: "mdi:gauge"
+
+  - platform: mqtt_subscribe
+    name: "Pressure P3"
+    id: pressure_p3
+    topic: "ro_plant/status/analog/p2"
+    accuracy_decimals: 2
+    unit_of_measurement: "bar"
+    icon: "mdi:gauge"
+
+  - platform: mqtt_subscribe
+    name: "Pressure P4"
+    id: pressure_p4
+    topic: "ro_plant/status/analog/p3"
+    accuracy_decimals: 2
+    unit_of_measurement: "bar"
+    icon: "mdi:gauge"
+
+  # Temperature
+  - platform: mqtt_subscribe
+    name: "Temperature"
+    id: temperature
+    topic: "ro_plant/status/analog/t"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+    icon: "mdi:thermometer"
+
+  # Flow sensors Q1-Q4
+  - platform: mqtt_subscribe
+    name: "Flow Q1"
+    id: flow_q1
+    topic: "ro_plant/status/flow/q0"
+    accuracy_decimals: 2
+    unit_of_measurement: "m³/h"
+    icon: "mdi:water-pump"
+
+  - platform: mqtt_subscribe
+    name: "Flow Q2"
+    id: flow_q2
+    topic: "ro_plant/status/flow/q1"
+    accuracy_decimals: 2
+    unit_of_measurement: "m³/h"
+    icon: "mdi:water-pump"
+
+  - platform: mqtt_subscribe
+    name: "Flow Q3"
+    id: flow_q3
+    topic: "ro_plant/status/flow/q2"
+    accuracy_decimals: 2
+    unit_of_measurement: "m³/h"
+    icon: "mdi:water-pump"
+
+  - platform: mqtt_subscribe
+    name: "Flow Q4"
+    id: flow_q4
+    topic: "ro_plant/status/flow/q3"
+    accuracy_decimals: 2
+    unit_of_measurement: "m³/h"
+    icon: "mdi:water-pump"
+
+  # Volume accumulators Q1-Q4
+  - platform: mqtt_subscribe
+    name: "Volume Q1"
+    id: volume_q1
+    topic: "ro_plant/status/flow/q0_vol"
+    accuracy_decimals: 1
+    unit_of_measurement: "m³"
+    icon: "mdi:counter"
+
+  - platform: mqtt_subscribe
+    name: "Volume Q2"
+    id: volume_q2
+    topic: "ro_plant/status/flow/q1_vol"
+    accuracy_decimals: 1
+    unit_of_measurement: "m³"
+    icon: "mdi:counter"
+
+  - platform: mqtt_subscribe
+    name: "Volume Q3"
+    id: volume_q3
+    topic: "ro_plant/status/flow/q2_vol"
+    accuracy_decimals: 1
+    unit_of_measurement: "m³"
+    icon: "mdi:counter"
+
+  - platform: mqtt_subscribe
+    name: "Volume Q4"
+    id: volume_q4
+    topic: "ro_plant/status/flow/q3_vol"
+    accuracy_decimals: 1
+    unit_of_measurement: "m³"
+    icon: "mdi:counter"
+
+  # Conductivity sensors S1-S3
+  - platform: mqtt_subscribe
+    name: "Conductivity S1"
+    id: conductivity_s1
+    topic: "ro_plant/status/conductivity/s0"
+    accuracy_decimals: 0
+    unit_of_measurement: "µS/cm"
+    icon: "mdi:flash"
+
+  - platform: mqtt_subscribe
+    name: "Conductivity S2"
+    id: conductivity_s2
+    topic: "ro_plant/status/conductivity/s1"
+    accuracy_decimals: 0
+    unit_of_measurement: "µS/cm"
+    icon: "mdi:flash"
+
+  - platform: mqtt_subscribe
+    name: "Conductivity S3"
+    id: conductivity_s3
+    topic: "ro_plant/status/conductivity/s2"
+    accuracy_decimals: 0
+    unit_of_measurement: "µS/cm"
+    icon: "mdi:flash"
+
+  # Conductivity temperature S1-S3
+  - platform: mqtt_subscribe
+    name: "Cond Temp S1"
+    id: cond_temp_s1
+    topic: "ro_plant/status/conductivity/s0_temp"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+
+  - platform: mqtt_subscribe
+    name: "Cond Temp S2"
+    id: cond_temp_s2
+    topic: "ro_plant/status/conductivity/s1_temp"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+
+  - platform: mqtt_subscribe
+    name: "Cond Temp S3"
+    id: cond_temp_s3
+    topic: "ro_plant/status/conductivity/s2_temp"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+
+  # Telemetry / calculated values
+  - platform: mqtt_subscribe
+    name: "Recovery"
+    id: recovery
+    topic: "ro_plant/status/telemetry/recovery"
+    accuracy_decimals: 1
+    unit_of_measurement: "%"
+    icon: "mdi:recycle"
+
+  - platform: mqtt_subscribe
+    name: "Filter dP"
+    id: filter_dp
+    topic: "ro_plant/status/telemetry/filter_dp"
+    accuracy_decimals: 2
+    unit_of_measurement: "bar"
+    icon: "mdi:filter"
+
+  - platform: mqtt_subscribe
+    name: "Selectivity 1"
+    id: selectivity1
+    topic: "ro_plant/status/telemetry/selectivity1"
+    accuracy_decimals: 1
+    unit_of_measurement: "%"
+
+  - platform: mqtt_subscribe
+    name: "Selectivity 2"
+    id: selectivity2
+    topic: "ro_plant/status/telemetry/selectivity2"
+    accuracy_decimals: 1
+    unit_of_measurement: "%"
+
+  - platform: mqtt_subscribe
+    name: "Recovery System"
+    id: recovery_sys
+    topic: "ro_plant/status/telemetry/recovery_sys"
+    accuracy_decimals: 1
+    unit_of_measurement: "%"
+
+  # Washing temperature target
+  - platform: mqtt_subscribe
+    name: "Wash Target Temp"
+    id: wash_target_temp
+    topic: "ro_plant/status/washing/target_temp"
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+
+  # Diagnostics
+  - platform: mqtt_subscribe
+    name: "Heap Free"
+    id: heap_free
+    topic: "ro_plant/status/diagnostics/heap_free"
+    accuracy_decimals: 0
+    unit_of_measurement: "bytes"
+    icon: "mdi:memory"
+
+  - platform: mqtt_subscribe
+    name: "Heap Min"
+    id: heap_min
+    topic: "ro_plant/status/diagnostics/heap_min"
+    accuracy_decimals: 0
+    unit_of_measurement: "bytes"
+    icon: "mdi:memory"
+
+  - platform: mqtt_subscribe
+    name: "Uptime Seconds"
+    id: uptime_sec
+    topic: "ro_plant/status/diagnostics/uptime"
+    accuracy_decimals: 0
+    unit_of_measurement: "s"
+    icon: "mdi:clock-outline"
+
+# --- Text Sensors (state strings, alarm texts) ---
+text_sensor:
+  - platform: mqtt_subscribe
+    name: "Plant State"
+    id: plant_state_text
+    topic: "ro_plant/status/state"
+    on_value:
+      - lambda: |-
+          // Parse JSON state: {"state":0,"auto_sub":0,"wash_sub":0,"fault":0}
+          // Simplified: direct text mapping
+          if (x == "IDLE") id(plant_state) = 0;
+          else if (x == "AUTO") id(plant_state) = 1;
+          else if (x == "WASHING") id(plant_state) = 2;
+          else if (x == "MANUAL") id(plant_state) = 3;
+          else if (x == "FAULT") id(plant_state) = 4;
+
+  - platform: mqtt_subscribe
+    name: "Active Alarm"
+    id: active_alarm_text
+    topic: "ro_plant/alarms/active"
+    icon: "mdi:alert"
+
+  - platform: mqtt_subscribe
+    name: "IO Status"
+    id: io_status_text
+    topic: "ro_plant/status/io"
+    on_value:
+      - lambda: |-
+          // Parse DI/DO bits from JSON
+          // {"di":255,"do":31}
+          // Actual parsing depends on message format
+
+  - platform: mqtt_subscribe
+    name: "Modbus Status"
+    id: modbus_status_text
+    topic: "ro_plant/status/diagnostics/modbus"
+
+  - platform: mqtt_subscribe
+    name: "Alarm History"
+    id: alarm_history_text
+    topic: "ro_plant/alarms/history"
+
+# --- MQTT command buttons ---
+button:
+  - platform: template
+    name: "Start Auto"
+    id: btn_start_auto
+    icon: "mdi:play"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "start_auto"
+
+  - platform: template
+    name: "Stop"
+    id: btn_stop
+    icon: "mdi:stop"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "stop"
+
+  - platform: template
+    name: "Manual Mode"
+    id: btn_manual
+    icon: "mdi:hand-back-right"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "set_manual"
+
+  - platform: template
+    name: "Start Washing"
+    id: btn_start_washing
+    icon: "mdi:washing-machine"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "start_washing"
+
+  - platform: template
+    name: "Confirm Wash"
+    id: btn_confirm_wash
+    icon: "mdi:check"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "confirm_wash"
+
+  - platform: template
+    name: "Reset Fault"
+    id: btn_reset_fault
+    icon: "mdi:restart"
+    on_press:
+      - mqtt.publish:
+          topic: "ro_plant/command/mode"
+          payload: "reset_fault"
+
+# --- Settings numbers (editable parameters) ---
+number:
+  # Pressure settings
+  - platform: template
+    name: "P1 Max"
+    id: set_p1_max
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    unit_of_measurement: "bar"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/pressure"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"p1_max\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "P3 Max"
+    id: set_p3_max
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    unit_of_measurement: "bar"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/pressure"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"p3_max\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "P4 Max"
+    id: set_p4_max
+    min_value: 0
+    max_value: 20
+    step: 0.1
+    unit_of_measurement: "bar"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/pressure"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"p4_max\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Filter dP Warning"
+    id: set_filter_dp_warn
+    min_value: 0
+    max_value: 5
+    step: 0.1
+    unit_of_measurement: "bar"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/pressure"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"filter_dp_warn\":%.1f}", x);
+            return std::string(buf);
+
+  # Doser settings
+  - platform: template
+    name: "Doser Run Time"
+    id: set_doser_run
+    min_value: 0
+    max_value: 120
+    step: 1
+    unit_of_measurement: "min"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/doser"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"run_time_min\":%.0f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Doser Cycle Time"
+    id: set_doser_cycle
+    min_value: 0
+    max_value: 480
+    step: 1
+    unit_of_measurement: "min"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/doser"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"cycle_time_min\":%.0f}", x);
+            return std::string(buf);
+
+  # Washing settings
+  - platform: template
+    name: "Wash Target Temp"
+    id: set_wash_target
+    min_value: 20
+    max_value: 80
+    step: 0.5
+    unit_of_measurement: "°C"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/washing"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"target_temp\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Wash Max Temp"
+    id: set_wash_max
+    min_value: 20
+    max_value: 95
+    step: 0.5
+    unit_of_measurement: "°C"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/washing"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"max_temp\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Wash Overshoot"
+    id: set_wash_overshoot
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    unit_of_measurement: "°C"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/washing"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"overshoot\":%.1f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Wash Hysteresis"
+    id: set_wash_hysteresis
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    unit_of_measurement: "°C"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/washing"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"hysteresis\":%.1f}", x);
+            return std::string(buf);
+
+  # Timeout settings
+  - platform: template
+    name: "Pump Confirm Timeout"
+    id: set_pump_confirm
+    min_value: 500
+    max_value: 30000
+    step: 100
+    unit_of_measurement: "ms"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/timeouts"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"pump_confirm_ms\":%.0f}", x);
+            return std::string(buf);
+
+  - platform: template
+    name: "Pump Ramp Timeout"
+    id: set_pump_ramp
+    min_value: 500
+    max_value: 30000
+    step: 100
+    unit_of_measurement: "ms"
+    optimistic: true
+    set_action:
+      - mqtt.publish:
+          topic: "ro_plant/settings/timeouts"
+          payload: !lambda |-
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"pump_ramp_ms\":%.0f}", x);
+            return std::string(buf);

@@ -1,0 +1,1971 @@
+# =============================================================================
+# RO Plant - LVGL Screen Definitions
+# 6 screens: Mnemonic, Parameters, Washing, Alarms, Settings, Diagnostics
+# ESPHome LVGL component format
+# =============================================================================
+#
+# NOTE: ESPHome's LVGL support is evolving. This file uses the lvgl: component
+# syntax. Some features (like complex P&ID diagrams with custom drawing) may
+# require custom components. This YAML represents the closest possible
+# approximation using standard LVGL widgets.
+#
+# Display: 1280x800 landscape
+# Layout: [Alarm Bar 40px] [Content 700px] [Nav Bar 60px]
+# =============================================================================
+
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - my_touchscreen
+  # --- Theme ---
+  theme:
+    obj:
+      bg_color: 0x1A1A2E
+      text_color: 0xE8E8E8
+      border_color: 0x0F3460
+    btn:
+      bg_color: 0x0F3460
+      text_color: 0xE8E8E8
+      radius: 6
+    label:
+      text_color: 0xE8E8E8
+    textarea:
+      bg_color: 0x0F3460
+      text_color: 0x00FF88
+      border_color: 0x00B4D8
+      border_width: 1
+      radius: 4
+
+  # =========================================================================
+  # TOP-LEVEL LAYOUT
+  # =========================================================================
+  top_layer:
+    widgets:
+      # --- ALARM BAR (top 40px) ---
+      - obj:
+          id: alarm_bar
+          x: 0
+          y: 0
+          width: 1280
+          height: 40
+          bg_color: 0x16213E
+          pad_all: 4
+          layout:
+            type: flex
+            flex_flow: ROW
+            main_place: SPACE_BETWEEN
+            cross_place: CENTER
+          widgets:
+            # Mode label
+            - label:
+                id: lbl_mode
+                width: 250
+                text_font: font_14
+                text: "IDLE"
+                text_color: 0x6C757D
+
+            # Active alarm scrolling text
+            - label:
+                id: lbl_alarm_ticker
+                width: 800
+                text_font: font_14
+                text: ""
+                text_color: 0xFF8C00
+                long_mode: SCROLL_CIRCULAR
+
+            # MQTT status
+            - label:
+                id: lbl_mqtt_status
+                width: 80
+                text_font: font_14
+                text: "MQTT:--"
+                text_color: 0xFF0000
+
+            # Language toggle button
+            - btn:
+                id: btn_lang
+                width: 50
+                height: 30
+                bg_color: 0x0F3460
+                on_click:
+                  - lambda: |-
+                      id(lang_ru) = !id(lang_ru);
+                widgets:
+                  - label:
+                      id: lbl_lang
+                      text: "RU"
+                      text_font: font_14
+                      align: CENTER
+
+      # --- NAVIGATION BAR (bottom 60px) ---
+      - obj:
+          id: nav_bar
+          x: 0
+          y: 740
+          width: 1280
+          height: 60
+          bg_color: 0x16213E
+          pad_all: 4
+          layout:
+            type: flex
+            flex_flow: ROW
+            main_place: SPACE_EVENLY
+            cross_place: CENTER
+          widgets:
+            - btn:
+                id: nav_mnemonic
+                width: 190
+                height: 50
+                bg_color: 0x00B4D8
+                on_click:
+                  - lvgl.page.show: page_mnemonic
+                  - lambda: id(current_screen) = 0;
+                widgets:
+                  - label:
+                      text: "Мнемосхема"
+                      text_font: font_14
+                      align: CENTER
+            - btn:
+                id: nav_parameters
+                width: 190
+                height: 50
+                bg_color: 0x0F3460
+                on_click:
+                  - lvgl.page.show: page_parameters
+                  - lambda: id(current_screen) = 1;
+                widgets:
+                  - label:
+                      text: "Параметры"
+                      text_font: font_14
+                      align: CENTER
+            - btn:
+                id: nav_washing
+                width: 190
+                height: 50
+                bg_color: 0x0F3460
+                on_click:
+                  - lvgl.page.show: page_washing
+                  - lambda: id(current_screen) = 2;
+                widgets:
+                  - label:
+                      text: "Промывка"
+                      text_font: font_14
+                      align: CENTER
+            - btn:
+                id: nav_alarms
+                width: 190
+                height: 50
+                bg_color: 0x0F3460
+                on_click:
+                  - lvgl.page.show: page_alarms
+                  - lambda: id(current_screen) = 3;
+                widgets:
+                  - label:
+                      text: "Аварии"
+                      text_font: font_14
+                      align: CENTER
+            - btn:
+                id: nav_settings
+                width: 190
+                height: 50
+                bg_color: 0x0F3460
+                on_click:
+                  - lvgl.page.show: page_settings
+                  - lambda: id(current_screen) = 4;
+                widgets:
+                  - label:
+                      text: "Настройки"
+                      text_font: font_14
+                      align: CENTER
+            - btn:
+                id: nav_diagnostics
+                width: 190
+                height: 50
+                bg_color: 0x0F3460
+                on_click:
+                  - lvgl.page.show: page_diagnostics
+                  - lambda: id(current_screen) = 5;
+                widgets:
+                  - label:
+                      text: "Диагностика"
+                      text_font: font_14
+                      align: CENTER
+
+  # =========================================================================
+  # PAGES (SCREENS)
+  # =========================================================================
+  pages:
+    # =====================================================================
+    # PAGE 0: MNEMONIC (P&ID Diagram)
+    # =====================================================================
+    - id: page_mnemonic
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      widgets:
+        # --- SOURCE TANK ---
+        - obj:
+            id: tank_source
+            x: 15
+            y: 15
+            width: 80
+            height: 220
+            bg_color: 0x1A1A2E
+            border_color: 0x00B4D8
+            border_width: 2
+            radius: 4
+            widgets:
+              # Tank fill level (dynamic height)
+              - obj:
+                  id: tank_source_fill
+                  x: 2
+                  width: 74
+                  height: 0
+                  bg_color: 0x00B4D8
+                  bg_opa: 150
+                  align: BOTTOM_MID
+              - label:
+                  text: "Исходный"
+                  text_font: font_12
+                  text_color: 0x8899AA
+                  align: TOP_MID
+                  y: -18
+
+        # --- FEED PUMP (circle) ---
+        - obj:
+            id: pump_feed
+            x: 210
+            y: 80
+            width: 60
+            height: 60
+            radius: 30
+            bg_color: 0x4A4A4A
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label:
+                  text: "P1"
+                  text_font: font_16
+                  text_color: 0xE8E8E8
+                  align: CENTER
+
+        # Pipe: Source → Feed pump
+        - obj:
+            x: 97
+            y: 108
+            width: 113
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- STAGE1 PUMP (circle) ---
+        - obj:
+            id: pump_stage1
+            x: 355
+            y: 80
+            width: 60
+            height: 60
+            radius: 30
+            bg_color: 0x4A4A4A
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label:
+                  text: "P2"
+                  text_font: font_16
+                  text_color: 0xE8E8E8
+                  align: CENTER
+
+        # Pipe: Feed pump → Stage1 pump
+        - obj:
+            x: 272
+            y: 108
+            width: 83
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- MEMBRANE 1 ---
+        - obj:
+            id: membrane1
+            x: 500
+            y: 70
+            width: 100
+            height: 80
+            bg_color: 0x1A3A5C
+            border_color: 0x00B4D8
+            border_width: 2
+            radius: 6
+            widgets:
+              - label:
+                  text: "M1"
+                  text_font: font_20
+                  text_color: 0x00B4D8
+                  align: CENTER
+
+        # Pipe: Stage1 → Membrane1
+        - obj:
+            x: 417
+            y: 108
+            width: 83
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- INTERMEDIATE TANK ---
+        - obj:
+            id: tank_intermediate
+            x: 655
+            y: 15
+            width: 80
+            height: 220
+            bg_color: 0x1A1A2E
+            border_color: 0x00B4D8
+            border_width: 2
+            radius: 4
+            widgets:
+              - obj:
+                  id: tank_inter_fill
+                  x: 2
+                  width: 74
+                  height: 0
+                  bg_color: 0x00B4D8
+                  bg_opa: 150
+                  align: BOTTOM_MID
+              - label:
+                  text: "Промежут."
+                  text_font: font_12
+                  text_color: 0x8899AA
+                  align: TOP_MID
+                  y: -18
+
+        # Pipe: Membrane1 → Intermediate tank
+        - obj:
+            x: 602
+            y: 108
+            width: 53
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- STAGE2 PUMP (circle) ---
+        - obj:
+            id: pump_stage2
+            x: 850
+            y: 80
+            width: 60
+            height: 60
+            radius: 30
+            bg_color: 0x4A4A4A
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label:
+                  text: "P3"
+                  text_font: font_16
+                  text_color: 0xE8E8E8
+                  align: CENTER
+
+        # Pipe: Intermediate → Stage2
+        - obj:
+            x: 737
+            y: 108
+            width: 113
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- MEMBRANE 2 ---
+        - obj:
+            id: membrane2
+            x: 995
+            y: 70
+            width: 100
+            height: 80
+            bg_color: 0x1A3A5C
+            border_color: 0x00B4D8
+            border_width: 2
+            radius: 6
+            widgets:
+              - label:
+                  text: "M2"
+                  text_font: font_20
+                  text_color: 0x00B4D8
+                  align: CENTER
+
+        # Pipe: Stage2 → Membrane2
+        - obj:
+            x: 912
+            y: 108
+            width: 83
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- PERMEATE TANK ---
+        - obj:
+            id: tank_permeate
+            x: 1150
+            y: 15
+            width: 80
+            height: 220
+            bg_color: 0x1A1A2E
+            border_color: 0x00B4D8
+            border_width: 2
+            radius: 4
+            widgets:
+              - obj:
+                  id: tank_perm_fill
+                  x: 2
+                  width: 74
+                  height: 0
+                  bg_color: 0x00B4D8
+                  bg_opa: 150
+                  align: BOTTOM_MID
+              - label:
+                  text: "Пермеат"
+                  text_font: font_12
+                  text_color: 0x8899AA
+                  align: TOP_MID
+                  y: -18
+
+        # Pipe: Membrane2 → Permeate tank
+        - obj:
+            x: 1097
+            y: 108
+            width: 53
+            height: 4
+            bg_color: 0x00B4D8
+
+        # --- HEATER indicator ---
+        - obj:
+            id: ind_heater
+            x: 135
+            y: 110
+            width: 50
+            height: 50
+            radius: 25
+            bg_color: 0x4A4A4A
+            border_color: 0x00B4D8
+            border_width: 1
+            widgets:
+              - label:
+                  text: "H"
+                  text_font: font_16
+                  text_color: 0xE8E8E8
+                  align: CENTER
+
+        # --- DOSER indicator ---
+        - obj:
+            id: ind_doser
+            x: 370
+            y: 110
+            width: 50
+            height: 50
+            radius: 25
+            bg_color: 0x4A4A4A
+            border_color: 0x00B4D8
+            border_width: 1
+            widgets:
+              - label:
+                  text: "D"
+                  text_font: font_16
+                  text_color: 0xE8E8E8
+                  align: CENTER
+
+        # ---- REJECT flow arrows (from membranes down) ----
+        # Membrane 1 reject line
+        - obj:
+            x: 548
+            y: 152
+            width: 4
+            height: 60
+            bg_color: 0xFF8C00
+        # Membrane 2 reject line
+        - obj:
+            x: 1043
+            y: 152
+            width: 4
+            height: 60
+            bg_color: 0xFF8C00
+
+        # ====== SENSOR VALUES ROW ======
+        # Temperature
+        - label:
+            id: lbl_temp
+            x: 30
+            y: 280
+            text: "T: --- °C"
+            text_font: font_16
+            text_color: 0x00FF88
+
+        # Flow Q1-Q4
+        - label:
+            id: lbl_q1
+            x: 220
+            y: 280
+            text: "Q1: --- m³/h"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_q2
+            x: 460
+            y: 280
+            text: "Q2: --- m³/h"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_q3
+            x: 700
+            y: 280
+            text: "Q3: --- m³/h"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_q4
+            x: 940
+            y: 280
+            text: "Q4: --- m³/h"
+            text_font: font_16
+            text_color: 0x00FF88
+
+        # Pressure P1-P4
+        - label:
+            id: lbl_p1
+            x: 220
+            y: 310
+            text: "P1: --- bar"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_p2
+            x: 460
+            y: 310
+            text: "P2: --- bar"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_p3
+            x: 700
+            y: 310
+            text: "P3: --- bar"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_p4
+            x: 940
+            y: 310
+            text: "P4: --- bar"
+            text_font: font_16
+            text_color: 0x00FF88
+
+        # Conductivity S1-S3
+        - label:
+            id: lbl_s1
+            x: 30
+            y: 340
+            text: "S1: --- µS/cm"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_s2
+            x: 430
+            y: 340
+            text: "S2: --- µS/cm"
+            text_font: font_16
+            text_color: 0x00FF88
+        - label:
+            id: lbl_s3
+            x: 850
+            y: 340
+            text: "S3: --- µS/cm"
+            text_font: font_16
+            text_color: 0x00FF88
+
+        # ====== TELEMETRY PANEL ======
+        - obj:
+            id: panel_telemetry
+            x: 30
+            y: 385
+            width: 620
+            height: 80
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 12
+            layout:
+              type: flex
+              flex_flow: ROW
+              main_place: SPACE_BETWEEN
+              cross_place: CENTER
+            widgets:
+              - obj:
+                  width: 200
+                  height: 60
+                  bg_opa: 0
+                  widgets:
+                    - label:
+                        text: "Recovery"
+                        text_font: font_14
+                        text_color: 0x8899AA
+                        align: TOP_LEFT
+                    - label:
+                        id: lbl_recovery
+                        text: "--- %"
+                        text_font: font_28
+                        text_color: 0x00FF88
+                        align: BOTTOM_LEFT
+              - obj:
+                  width: 200
+                  height: 60
+                  bg_opa: 0
+                  widgets:
+                    - label:
+                        text: "Filter dP"
+                        text_font: font_14
+                        text_color: 0x8899AA
+                        align: TOP_LEFT
+                    - label:
+                        id: lbl_filter_dp
+                        text: "--- bar"
+                        text_font: font_28
+                        text_color: 0x00FF88
+                        align: BOTTOM_LEFT
+              - obj:
+                  width: 180
+                  height: 60
+                  bg_opa: 0
+                  widgets:
+                    - label:
+                        text: "Режим"
+                        text_font: font_14
+                        text_color: 0x8899AA
+                        align: TOP_LEFT
+                    - label:
+                        id: lbl_state_mnem
+                        text: "IDLE"
+                        text_font: font_28
+                        text_color: 0x6C757D
+                        align: BOTTOM_LEFT
+
+        # ====== CONTROL BUTTONS ROW ======
+        - obj:
+            x: 15
+            y: 500
+            width: 1250
+            height: 60
+            bg_opa: 0
+            layout:
+              type: flex
+              flex_flow: ROW
+              main_place: START
+              pad_column: 16
+            widgets:
+              # START AUTO
+              - btn:
+                  id: btn_mnem_start
+                  width: 230
+                  height: 54
+                  bg_color: 0x2D6A4F
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "start_auto"
+                  widgets:
+                    - label:
+                        text: "СТАРТ АВТО"
+                        text_font: font_16
+                        align: CENTER
+
+              # STOP
+              - btn:
+                  id: btn_mnem_stop
+                  width: 230
+                  height: 54
+                  bg_color: 0xE63946
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "stop"
+                  widgets:
+                    - label:
+                        text: "СТОП"
+                        text_font: font_16
+                        align: CENTER
+
+              # MANUAL
+              - btn:
+                  id: btn_mnem_manual
+                  width: 230
+                  height: 54
+                  bg_color: 0xFFC107
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "set_manual"
+                  widgets:
+                    - label:
+                        text: "РУЧНОЙ"
+                        text_font: font_16
+                        text_color: 0x1A1A2E
+                        align: CENTER
+
+              # START WASHING
+              - btn:
+                  id: btn_mnem_wash
+                  width: 230
+                  height: 54
+                  bg_color: 0x007BFF
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "start_washing"
+                  widgets:
+                    - label:
+                        text: "ПРОМЫВКА"
+                        text_font: font_16
+                        align: CENTER
+
+              # RESET FAULT (hidden by default)
+              - btn:
+                  id: btn_mnem_reset
+                  width: 230
+                  height: 54
+                  bg_color: 0xFF8C00
+                  hidden: true
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "reset_fault"
+                  widgets:
+                    - label:
+                        text: "СБРОС АВАРИИ"
+                        text_font: font_16
+                        align: CENTER
+
+    # =====================================================================
+    # PAGE 1: PARAMETERS (Data Table)
+    # =====================================================================
+    - id: page_parameters
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      scrollbar_mode: AUTO
+      widgets:
+        # --- Table Header ---
+        - obj:
+            x: 16
+            y: 8
+            width: 1248
+            height: 36
+            bg_color: 0x16213E
+            radius: 4
+            layout:
+              type: flex
+              flex_flow: ROW
+              cross_place: CENTER
+            widgets:
+              - label:
+                  width: 200
+                  text: "Параметр"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+              - label:
+                  width: 180
+                  text: "Значение"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+              - label:
+                  width: 180
+                  text: "Доп."
+                  text_font: font_16
+                  text_color: 0x00B4D8
+              - label:
+                  width: 120
+                  text: "Статус"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+
+        # --- PRESSURE SECTION ---
+        - label:
+            x: 16
+            y: 52
+            text: "Давление"
+            text_font: font_18
+            text_color: 0x00B4D8
+
+        # P1 row
+        - obj:
+            x: 16
+            y: 76
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "P1 (вход)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_p1, width: 180, text: "--- bar", text_font: font_16, text_color: 0x00FF88}
+              - label: {width: 180, text: "", text_font: font_14}
+              - label: {id: tbl_p1_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # P2 row
+        - obj:
+            x: 16
+            y: 110
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "P2 (после фильтра)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_p2, width: 180, text: "--- bar", text_font: font_16, text_color: 0x00FF88}
+              - label: {width: 180, text: "", text_font: font_14}
+              - label: {id: tbl_p2_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # P3 row
+        - obj:
+            x: 16
+            y: 144
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "P3 (ступень 1)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_p3, width: 180, text: "--- bar", text_font: font_16, text_color: 0x00FF88}
+              - label: {width: 180, text: "", text_font: font_14}
+              - label: {id: tbl_p3_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # P4 row
+        - obj:
+            x: 16
+            y: 178
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "P4 (ступень 2)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_p4, width: 180, text: "--- bar", text_font: font_16, text_color: 0x00FF88}
+              - label: {width: 180, text: "", text_font: font_14}
+              - label: {id: tbl_p4_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+
+        # Separator
+        - obj: {x: 16, y: 218, width: 1248, height: 1, bg_color: 0x0F3460}
+
+        # --- TEMPERATURE SECTION ---
+        - label:
+            x: 16
+            y: 226
+            text: "Температура"
+            text_font: font_18
+            text_color: 0x00B4D8
+        - obj:
+            x: 16
+            y: 250
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "T (исходная)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_temp, width: 180, text: "--- °C", text_font: font_16, text_color: 0x00FF88}
+
+        # Separator
+        - obj: {x: 16, y: 290, width: 1248, height: 1, bg_color: 0x0F3460}
+
+        # --- FLOW SECTION ---
+        - label:
+            x: 16
+            y: 298
+            text: "Расход"
+            text_font: font_18
+            text_color: 0x00B4D8
+
+        # Q1
+        - obj:
+            x: 16
+            y: 322
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Q1 (питание)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q1, width: 180, text: "--- m³/h", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_q1_vol, width: 180, text: "--- m³", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q1_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # Q2
+        - obj:
+            x: 16
+            y: 356
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Q2 (пермеат 1)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q2, width: 180, text: "--- m³/h", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_q2_vol, width: 180, text: "--- m³", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q2_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # Q3
+        - obj:
+            x: 16
+            y: 390
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Q3 (пермеат 2)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q3, width: 180, text: "--- m³/h", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_q3_vol, width: 180, text: "--- m³", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q3_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # Q4
+        - obj:
+            x: 16
+            y: 424
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Q4 (концентрат)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q4, width: 180, text: "--- m³/h", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_q4_vol, width: 180, text: "--- m³", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_q4_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+
+        # Separator
+        - obj: {x: 16, y: 464, width: 1248, height: 1, bg_color: 0x0F3460}
+
+        # --- CONDUCTIVITY SECTION ---
+        - label:
+            x: 16
+            y: 472
+            text: "Проводимость"
+            text_font: font_18
+            text_color: 0x00B4D8
+        # S1
+        - obj:
+            x: 16
+            y: 496
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "S1 (исходная)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s1, width: 180, text: "--- µS/cm", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_s1_t, width: 180, text: "--- °C", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s1_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # S2
+        - obj:
+            x: 16
+            y: 530
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "S2 (пермеат 1)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s2, width: 180, text: "--- µS/cm", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_s2_t, width: 180, text: "--- °C", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s2_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+        # S3
+        - obj:
+            x: 16
+            y: 564
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "S3 (пермеат 2)", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s3, width: 180, text: "--- µS/cm", text_font: font_16, text_color: 0x00FF88}
+              - label: {id: tbl_s3_t, width: 180, text: "--- °C", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_s3_st, width: 120, text: "---", text_font: font_14, text_color: 0x8899AA}
+
+        # Separator
+        - obj: {x: 16, y: 604, width: 1248, height: 1, bg_color: 0x0F3460}
+
+        # --- CALCULATED SECTION ---
+        - label:
+            x: 16
+            y: 612
+            text: "Расчётные"
+            text_font: font_18
+            text_color: 0x00B4D8
+        - obj:
+            x: 16
+            y: 636
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Перепад фильтра", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_fdp, width: 180, text: "--- bar", text_font: font_16, text_color: 0x00FF88}
+        - obj:
+            x: 16
+            y: 670
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Recovery сист.", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_rec_sys, width: 180, text: "--- %", text_font: font_16, text_color: 0x00FF88}
+        - obj:
+            x: 16
+            y: 704
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Селективность 1", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_sel1, width: 180, text: "--- %", text_font: font_16, text_color: 0x00FF88}
+        - obj:
+            x: 16
+            y: 738
+            width: 1248
+            height: 32
+            bg_opa: 0
+            layout: {type: flex, flex_flow: ROW, cross_place: CENTER}
+            widgets:
+              - label: {width: 200, text: "Селективность 2", text_font: font_14, text_color: 0x8899AA}
+              - label: {id: tbl_sel2, width: 180, text: "--- %", text_font: font_16, text_color: 0x00FF88}
+
+    # =====================================================================
+    # PAGE 2: WASHING (7-Phase Stepper)
+    # =====================================================================
+    - id: page_washing
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      widgets:
+        # --- STEPPER HEADER ---
+        - label:
+            x: 60
+            y: 20
+            text: "Цикл промывки"
+            text_font: font_20
+            text_color: 0x00B4D8
+
+        # --- 7-PHASE STEPPER (circles + connecting lines) ---
+        # Phase circles at y=70, spread across 1280px
+        # Spacing: ~170px between centers, starting at x=60
+
+        # Phase 1: Wait Heat
+        - obj:
+            id: wash_phase_1
+            x: 60
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "1", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 44, y: 132, text: "Ожид.\nнагрева", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 1→2
+        - obj: {id: wash_conn_12, x: 118, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 2: Heating
+        - obj:
+            id: wash_phase_2
+            x: 184
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "2", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 172, y: 132, text: "Нагрев", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 2→3
+        - obj: {id: wash_conn_23, x: 242, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 3: Wait Supply
+        - obj:
+            id: wash_phase_3
+            x: 308
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "3", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 288, y: 132, text: "Ожид.\nподачи", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 3→4
+        - obj: {id: wash_conn_34, x: 366, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 4: Supply
+        - obj:
+            id: wash_phase_4
+            x: 432
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "4", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 422, y: 132, text: "Подача", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 4→5
+        - obj: {id: wash_conn_45, x: 490, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 5: Wait Drain
+        - obj:
+            id: wash_phase_5
+            x: 556
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "5", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 536, y: 132, text: "Ожид.\nслива", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 5→6
+        - obj: {id: wash_conn_56, x: 614, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 6: Drain
+        - obj:
+            id: wash_phase_6
+            x: 680
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "6", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 674, y: 132, text: "Слив", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # Connector 6→7
+        - obj: {id: wash_conn_67, x: 738, y: 96, width: 64, height: 4, bg_color: 0x4A4A4A}
+
+        # Phase 7: Done
+        - obj:
+            id: wash_phase_7
+            x: 804
+            y: 70
+            width: 56
+            height: 56
+            radius: 28
+            bg_color: 0x0F3460
+            border_color: 0x00B4D8
+            border_width: 2
+            widgets:
+              - label: {text: "7", text_font: font_20, text_color: 0xE8E8E8, align: CENTER}
+        - label: {x: 790, y: 132, text: "Готово", text_font: font_12, text_color: 0x8899AA, text_align: CENTER}
+
+        # --- CURRENT PHASE NAME (large) ---
+        - label:
+            id: lbl_wash_phase_name
+            x: 60
+            y: 180
+            text: "---"
+            text_font: font_28
+            text_color: 0x00B4D8
+
+        # --- TEMPERATURE PANEL ---
+        - obj:
+            id: panel_wash_temp
+            x: 60
+            y: 230
+            width: 500
+            height: 140
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 16
+            widgets:
+              - label:
+                  text: "Температура"
+                  text_font: font_18
+                  text_color: 0x00B4D8
+                  align: TOP_LEFT
+              - label:
+                  id: lbl_wash_temp
+                  text: "--- / --- °C"
+                  text_font: font_36
+                  text_color: 0x00FF88
+                  align: CENTER
+              - label:
+                  id: lbl_wash_temp_info
+                  text: "Цель: ---°C | Макс: ---°C"
+                  text_font: font_14
+                  text_color: 0x8899AA
+                  align: BOTTOM_LEFT
+
+        # --- WASH CONTROL BUTTONS ---
+        - obj:
+            x: 60
+            y: 400
+            width: 1000
+            height: 70
+            bg_opa: 0
+            layout:
+              type: flex
+              flex_flow: ROW
+              pad_column: 24
+            widgets:
+              # START WASHING
+              - btn:
+                  id: btn_wash_start
+                  width: 300
+                  height: 64
+                  bg_color: 0x007BFF
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "start_washing"
+                  widgets:
+                    - label: {text: "СТАРТ ПРОМЫВКИ", text_font: font_20, align: CENTER}
+
+              # CONFIRM (hidden by default, shown in wait phases)
+              - btn:
+                  id: btn_wash_confirm
+                  width: 300
+                  height: 64
+                  bg_color: 0x2D6A4F
+                  hidden: true
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "confirm_wash"
+                  widgets:
+                    - label: {text: "ПОДТВЕРДИТЬ", text_font: font_20, align: CENTER}
+
+              # STOP
+              - btn:
+                  id: btn_wash_stop
+                  width: 300
+                  height: 64
+                  bg_color: 0xE63946
+                  hidden: true
+                  on_click:
+                    - mqtt.publish:
+                        topic: "ro_plant/command/mode"
+                        payload: "stop"
+                  widgets:
+                    - label: {text: "СТОП", text_font: font_20, align: CENTER}
+
+    # =====================================================================
+    # PAGE 3: ALARMS
+    # =====================================================================
+    - id: page_alarms
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      widgets:
+        # --- ACTIVE ALARMS ---
+        - label:
+            x: 20
+            y: 8
+            text: "Активные аварии"
+            text_font: font_18
+            text_color: 0xFF8C00
+
+        - obj:
+            id: alarm_active_container
+            x: 20
+            y: 36
+            width: 1240
+            height: 240
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 8
+            scrollbar_mode: AUTO
+            widgets:
+              # Dynamic alarm rows will be populated via lambda
+              - label:
+                  id: lbl_no_alarms
+                  text: "Нет активных аварий"
+                  text_font: font_16
+                  text_color: 0x6C757D
+                  align: CENTER
+
+        # --- ALARM HISTORY ---
+        - label:
+            x: 20
+            y: 290
+            text: "История аварий"
+            text_font: font_18
+            text_color: 0x8899AA
+
+        - obj:
+            id: alarm_history_container
+            x: 20
+            y: 318
+            width: 1240
+            height: 290
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 8
+            scrollbar_mode: AUTO
+            widgets:
+              - label:
+                  id: lbl_no_history
+                  text: "История пуста"
+                  text_font: font_16
+                  text_color: 0x6C757D
+                  align: CENTER
+
+        # --- RESET FAULT BUTTON ---
+        - btn:
+            id: btn_alarm_reset
+            x: 20
+            y: 630
+            width: 220
+            height: 54
+            bg_color: 0xE63946
+            hidden: true
+            on_click:
+              - mqtt.publish:
+                  topic: "ro_plant/command/mode"
+                  payload: "reset_fault"
+            widgets:
+              - label: {text: "СБРОС АВАРИИ", text_font: font_16, align: CENTER}
+
+    # =====================================================================
+    # PAGE 4: SETTINGS (Tabbed + Numeric Keypad)
+    # =====================================================================
+    - id: page_settings
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      widgets:
+        # --- LEFT SIDE: SETTINGS TABS (0-800px) ---
+        - tabview:
+            id: settings_tabs
+            x: 0
+            y: 0
+            width: 800
+            height: 650
+            tab_position: TOP
+            widgets:
+              # TAB 1: Pressure
+              - tab:
+                  name: "Давление"
+                  widgets:
+                    - obj:
+                        width: 760
+                        height: 500
+                        bg_opa: 0
+                        pad_all: 16
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 12}
+                        widgets:
+                          # P1 Max
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "P1 Макс (bar):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_p1_max
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          # P3 Max
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "P3 Макс (bar):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_p3_max
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          # P4 Max
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "P4 Макс (bar):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_p4_max
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          # Filter dP Warning
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "dP фильтра предупр. (bar):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_fdp_warn
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          # Apply button
+                          - btn:
+                              width: 200
+                              height: 50
+                              bg_color: 0x0077B6
+                              on_click:
+                                - mqtt.publish:
+                                    topic: "ro_plant/settings/pressure"
+                                    payload: !lambda |-
+                                      char buf[128];
+                                      snprintf(buf, sizeof(buf),
+                                        "{\"p1_max\":%s,\"p3_max\":%s,\"p4_max\":%s,\"filter_dp_warn\":%s}",
+                                        "0", "0", "0", "0");
+                                      return std::string(buf);
+                              widgets:
+                                - label: {text: "ПРИМЕНИТЬ", text_font: font_16, align: CENTER}
+
+              # TAB 2: Doser
+              - tab:
+                  name: "Дозатор"
+                  widgets:
+                    - obj:
+                        width: 760
+                        height: 500
+                        bg_opa: 0
+                        pad_all: 16
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 12}
+                        widgets:
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "Время работы (мин):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_doser_run
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 250, text: "Время цикла (мин):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea:
+                                    id: inp_doser_cycle
+                                    width: 160
+                                    height: 44
+                                    one_line: true
+                                    text: ""
+                                    max_length: 8
+                          - btn:
+                              width: 200
+                              height: 50
+                              bg_color: 0x0077B6
+                              on_click:
+                                - mqtt.publish:
+                                    topic: "ro_plant/settings/doser"
+                                    payload: "{}"
+                              widgets:
+                                - label: {text: "ПРИМЕНИТЬ", text_font: font_16, align: CENTER}
+
+              # TAB 3: Washing
+              - tab:
+                  name: "Промывка"
+                  widgets:
+                    - obj:
+                        width: 760
+                        height: 500
+                        bg_opa: 0
+                        pad_all: 16
+                        scrollbar_mode: AUTO
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 10}
+                        widgets:
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Целевая темп. (°C):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_target, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Макс. темп. (°C):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_max, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Перерегулирование (°C):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_overshoot, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Гистерезис (°C):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_hyst, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Таймаут нагрева (мин):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_heat_to, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Время подачи (мин):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_supply, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Время слива (мин):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_wash_drain, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - btn:
+                              width: 200
+                              height: 50
+                              bg_color: 0x0077B6
+                              on_click:
+                                - mqtt.publish:
+                                    topic: "ro_plant/settings/washing"
+                                    payload: "{}"
+                              widgets:
+                                - label: {text: "ПРИМЕНИТЬ", text_font: font_16, align: CENTER}
+
+              # TAB 4: Timeouts
+              - tab:
+                  name: "Таймауты"
+                  widgets:
+                    - obj:
+                        width: 760
+                        height: 500
+                        bg_opa: 0
+                        pad_all: 16
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 12}
+                        widgets:
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Подтв. насоса (мс):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_pump_confirm, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - obj:
+                              width: 720
+                              height: 50
+                              bg_opa: 0
+                              layout: {type: flex, flex_flow: ROW, cross_place: CENTER, pad_column: 16}
+                              widgets:
+                                - label: {width: 280, text: "Разгон насоса (мс):", text_font: font_16, text_color: 0x8899AA}
+                                - textarea: {id: inp_pump_ramp, width: 160, height: 44, one_line: true, text: "", max_length: 8}
+                          - btn:
+                              width: 200
+                              height: 50
+                              bg_color: 0x0077B6
+                              on_click:
+                                - mqtt.publish:
+                                    topic: "ro_plant/settings/timeouts"
+                                    payload: "{}"
+                              widgets:
+                                - label: {text: "ПРИМЕНИТЬ", text_font: font_16, align: CENTER}
+
+        # --- RIGHT SIDE: NUMERIC KEYPAD (800-1280px) ---
+        - obj:
+            id: numpad
+            x: 820
+            y: 80
+            width: 420
+            height: 390
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 16
+            widgets:
+              - label:
+                  text: "Клавиатура"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+                  align: TOP_MID
+
+              # Row 1: 7 8 9 DEL
+              - obj:
+                  x: 0
+                  y: 30
+                  width: 388
+                  height: 72
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW, pad_column: 8}
+                  widgets:
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "7", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "8", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "9", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x2A3E5C, widgets: [{label: {text: "DEL", text_font: font_16, align: CENTER}}]}
+
+              # Row 2: 4 5 6 AC
+              - obj:
+                  x: 0
+                  y: 110
+                  width: 388
+                  height: 72
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW, pad_column: 8}
+                  widgets:
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "4", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "5", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "6", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0xE63946, widgets: [{label: {text: "AC", text_font: font_16, align: CENTER}}]}
+
+              # Row 3: 1 2 3 .
+              - obj:
+                  x: 0
+                  y: 190
+                  width: 388
+                  height: 72
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW, pad_column: 8}
+                  widgets:
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "1", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "2", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "3", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 88, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: ".", text_font: font_20, align: CENTER}}]}
+
+              # Row 4: 0 (wide) OK
+              - obj:
+                  x: 0
+                  y: 270
+                  width: 388
+                  height: 72
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW, pad_column: 8}
+                  widgets:
+                    - btn: {width: 184, height: 68, bg_color: 0x0F3460, widgets: [{label: {text: "0", text_font: font_20, align: CENTER}}]}
+                    - btn: {width: 184, height: 68, bg_color: 0x0077B6, widgets: [{label: {text: "OK", text_font: font_20, align: CENTER}}]}
+
+    # =====================================================================
+    # PAGE 5: DIAGNOSTICS
+    # =====================================================================
+    - id: page_diagnostics
+      bg_color: 0x1A1A2E
+      width: 1280
+      height: 700
+      y: 40
+      widgets:
+        # --- SYSTEM PANEL ---
+        - obj:
+            id: panel_system
+            x: 20
+            y: 16
+            width: 380
+            height: 200
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 16
+            widgets:
+              - label:
+                  text: "Система"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+                  align: TOP_LEFT
+
+              - label:
+                  id: lbl_diag_heap_free
+                  x: 0
+                  y: 36
+                  text: "Heap Free:  --- bytes"
+                  text_font: font_14
+                  text_color: 0x00FF88
+
+              - label:
+                  id: lbl_diag_heap_min
+                  x: 0
+                  y: 60
+                  text: "Heap Min:   --- bytes"
+                  text_font: font_14
+                  text_color: 0x00FF88
+
+              - label:
+                  id: lbl_diag_uptime
+                  x: 0
+                  y: 84
+                  text: "Uptime:     ---"
+                  text_font: font_14
+                  text_color: 0x00FF88
+
+              - label:
+                  id: lbl_diag_mqtt
+                  x: 0
+                  y: 108
+                  text: "MQTT:       OFFLINE"
+                  text_font: font_14
+                  text_color: 0xFF0000
+
+        # --- MODBUS DEVICES PANEL ---
+        - obj:
+            id: panel_modbus
+            x: 420
+            y: 16
+            width: 840
+            height: 200
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 16
+            widgets:
+              - label:
+                  text: "Устройства Modbus"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+                  align: TOP_LEFT
+
+              # Table header
+              - obj:
+                  x: 0
+                  y: 30
+                  width: 808
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 250, text: "Устройство", text_font: font_14, text_color: 0x8899AA}
+                    - label: {width: 150, text: "Статус", text_font: font_14, text_color: 0x8899AA}
+                    - label: {width: 140, text: "Ошибки", text_font: font_14, text_color: 0x8899AA}
+
+              # Device rows
+              - obj:
+                  x: 0
+                  y: 58
+                  width: 808
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 250, text: "Waveshare AI", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_mb_dev1_st, width: 150, text: "---", text_font: font_14, text_color: 0x6C757D}
+                    - label: {id: lbl_mb_dev1_err, width: 140, text: "0", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 86
+                  width: 808
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 250, text: "URZh2KM", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_mb_dev2_st, width: 150, text: "---", text_font: font_14, text_color: 0x6C757D}
+                    - label: {id: lbl_mb_dev2_err, width: 140, text: "0", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 114
+                  width: 808
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 250, text: "SL21-201", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_mb_dev3_st, width: 150, text: "---", text_font: font_14, text_color: 0x6C757D}
+                    - label: {id: lbl_mb_dev3_err, width: 140, text: "0", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 142
+                  width: 808
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 250, text: "SL21-101", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_mb_dev4_st, width: 150, text: "---", text_font: font_14, text_color: 0x6C757D}
+                    - label: {id: lbl_mb_dev4_err, width: 140, text: "0", text_font: font_14, text_color: 0x00FF88}
+
+        # --- TASK STACKS PANEL ---
+        - obj:
+            id: panel_tasks
+            x: 20
+            y: 236
+            width: 1240
+            height: 240
+            bg_color: 0x16213E
+            radius: 8
+            pad_all: 16
+            widgets:
+              - label:
+                  text: "Стеки задач"
+                  text_font: font_16
+                  text_color: 0x00B4D8
+                  align: TOP_LEFT
+
+              # Header
+              - obj:
+                  x: 0
+                  y: 30
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "Задача", text_font: font_14, text_color: 0x8899AA}
+                    - label: {width: 200, text: "Свободный стек", text_font: font_14, text_color: 0x8899AA}
+
+              # Task rows
+              - obj:
+                  x: 0
+                  y: 58
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "Modbus", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_task_modbus, width: 200, text: "--- bytes", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 86
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "IO", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_task_io, width: 200, text: "--- bytes", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 114
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "Process", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_task_process, width: 200, text: "--- bytes", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 142
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "Watchdog", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_task_watchdog, width: 200, text: "--- bytes", text_font: font_14, text_color: 0x00FF88}
+
+              - obj:
+                  x: 0
+                  y: 170
+                  width: 1208
+                  height: 24
+                  bg_opa: 0
+                  layout: {type: flex, flex_flow: ROW}
+                  widgets:
+                    - label: {width: 300, text: "MQTT", text_font: font_14, text_color: 0xE8E8E8}
+                    - label: {id: lbl_task_mqtt, width: 200, text: "--- bytes", text_font: font_14, text_color: 0x00FF88}
+
+  # =========================================================================
+  # UPDATE LOGIC (interval-based, like 250ms refresh timer)
+  # =========================================================================
+  on_idle:
+    - interval: 250ms
+      then:
+        - lambda: |-
+            // --- Update alarm bar mode label ---
+            auto mode_lbl = id(lbl_mode);
+            auto mqtt_lbl = id(lbl_mqtt_status);
+
+            // MQTT status
+            if (id(mqtt_connected)) {
+              lv_label_set_text(mqtt_lbl, "MQTT:OK");
+              lv_obj_set_style_text_color(mqtt_lbl, lv_color_hex(0x00FF88), 0);
+            } else {
+              lv_label_set_text(mqtt_lbl, "MQTT:--");
+              lv_obj_set_style_text_color(mqtt_lbl, lv_color_hex(0xFF0000), 0);
+            }
+
+            // Mode label color by state
+            uint32_t state_color;
+            const char* state_text;
+            switch(id(plant_state)) {
+              case 0: state_color = 0x6C757D; state_text = "IDLE"; break;
+              case 1: state_color = 0x28A745; state_text = "AUTO"; break;
+              case 2: state_color = 0x007BFF; state_text = "WASHING"; break;
+              case 3: state_color = 0xFFC107; state_text = "MANUAL"; break;
+              case 4: state_color = 0xDC3545; state_text = "FAULT"; break;
+              default: state_color = 0x6C757D; state_text = "---"; break;
+            }
+            lv_label_set_text(mode_lbl, state_text);
+            lv_obj_set_style_text_color(mode_lbl, lv_color_hex(state_color), 0);
+
+            // --- Update RESET FAULT button visibility ---
+            bool is_fault = (id(plant_state) == 4);
+            if (is_fault) {
+              lv_obj_clear_flag(id(btn_mnem_reset), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(id(btn_alarm_reset), LV_OBJ_FLAG_HIDDEN);
+            } else {
+              lv_obj_add_flag(id(btn_mnem_reset), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(id(btn_alarm_reset), LV_OBJ_FLAG_HIDDEN);
+            }
+
+            // --- Update washing buttons visibility ---
+            bool is_washing = (id(plant_state) == 2);
+            if (is_washing) {
+              lv_obj_add_flag(id(btn_wash_start), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(id(btn_wash_stop), LV_OBJ_FLAG_HIDDEN);
+              // Show confirm only in wait phases (sub 0, 2, 4)
+              int ws = id(wash_substate);
+              if (ws == 0 || ws == 2 || ws == 4) {
+                lv_obj_clear_flag(id(btn_wash_confirm), LV_OBJ_FLAG_HIDDEN);
+              } else {
+                lv_obj_add_flag(id(btn_wash_confirm), LV_OBJ_FLAG_HIDDEN);
+              }
+            } else {
+              lv_obj_clear_flag(id(btn_wash_start), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(id(btn_wash_stop), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(id(btn_wash_confirm), LV_OBJ_FLAG_HIDDEN);
+            }

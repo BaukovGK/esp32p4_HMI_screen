@@ -1,3 +1,14 @@
+/**
+ * @file mqtt_app.c
+ * @brief MQTT-клиент для HMI-дисплея установки обратного осмоса.
+ *
+ * Управляет подключением к MQTT-брокеру, подпиской на топики статуса
+ * и аварий, публикацией команд управления и настроек.
+ * Использует ESP-IDF MQTT client API. При подключении подписывается
+ * на ro_plant/status/# (QoS 0) и ro_plant/alarms (QoS 1).
+ * Публикует Last Will "offline" на топик ro_hmi/availability.
+ */
+#ifndef LVGL_LIVE_PREVIEW
 #include "mqtt_app.h"
 #include "mqtt_topics.h"
 #include "mqtt_parser.h"
@@ -9,8 +20,20 @@
 #include <stdio.h>
 
 static const char *TAG = "mqtt_app";
+
+/** Дескриптор MQTT-клиента ESP-IDF (NULL если не инициализирован) */
 static esp_mqtt_client_handle_t s_client = NULL;
 
+/**
+ * Обработчик событий MQTT-клиента.
+ *
+ * Обрабатывает следующие события:
+ * - MQTT_EVENT_CONNECTED    -- подписка на топики статуса и аварий,
+ *                              публикация "online" на ro_hmi/availability
+ * - MQTT_EVENT_DISCONNECTED -- обновление статуса подключения в plant_data
+ * - MQTT_EVENT_DATA         -- маршрутизация входящих сообщений через mqtt_handle_incoming()
+ * - MQTT_EVENT_ERROR        -- логирование типа ошибки
+ */
 static void mqtt_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
@@ -19,19 +42,24 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "Connected to MQTT broker");
+        // Обновляем статус подключения в общей структуре данных
         plant_data_set_mqtt_status(true);
+        // Подписка на все топики статуса установки (QoS 0)
         esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_STATUS_ALL, 0);
+        // Подписка на аварийные сообщения (QoS 1 для гарантии доставки)
         esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_ALARMS, 1);
-        /* Publish availability */
+        /* Публикация доступности HMI (retained) */
         esp_mqtt_client_publish(s_client, "ro_hmi/availability", "online", 0, 1, 1);
         break;
 
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGW(TAG, "Disconnected from MQTT broker");
+        // Сброс статуса подключения
         plant_data_set_mqtt_status(false);
         break;
 
     case MQTT_EVENT_DATA:
+        // Передача входящего сообщения парсеру для обработки
         mqtt_handle_incoming(event->topic, event->topic_len,
                              event->data, event->data_len);
         break;
@@ -47,35 +75,55 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
+/**
+ * Инициализация и запуск MQTT-клиента.
+ *
+ * Конфигурация клиента:
+ * - URI брокера: из CONFIG_MQTT_BROKER_URI (по умолчанию mqtt://192.168.1.1:1883)
+ * - Client ID: из CONFIG_MQTT_CLIENT_ID
+ * - Last Will: "offline" на ro_hmi/availability (QoS 1, retained)
+ * - Автопереподключение каждые 5 секунд
+ * - Размер стека задачи: 8192, приоритет: 6
+ * - Размер буфера: 2048 байт
+ *
+ * @return ESP_OK при успехе, ESP_FAIL если инициализация не удалась
+ */
 esp_err_t mqtt_client_start(void)
 {
     const esp_mqtt_client_config_t cfg = {
         .broker.address.uri = CONFIG_MQTT_BROKER_URI,
         .credentials.client_id = CONFIG_MQTT_CLIENT_ID,
         .session.last_will = {
-            .topic = "ro_hmi/availability",
-            .msg = "offline",
+            .topic = "ro_hmi/availability",   // Топик Last Will Testament
+            .msg = "offline",                  // Сообщение при потере связи
             .msg_len = 7,
-            .qos = 1,
-            .retain = 1,
+            .qos = 1,                          // Гарантированная доставка
+            .retain = 1,                       // Сохранение на брокере
         },
-        .network.reconnect_timeout_ms = 5000,
-        .task.stack_size = 8192,
-        .task.priority = 6,
-        .buffer.size = 2048,
+        .network.reconnect_timeout_ms = 5000,  // Переподключение каждые 5 сек
+        .task.stack_size = 8192,                // Размер стека задачи MQTT
+        .task.priority = 6,                     // Приоритет задачи MQTT
+        .buffer.size = 2048,                    // Размер буфера приема/передачи
     };
 
+    // Инициализация MQTT-клиента
     s_client = esp_mqtt_client_init(&cfg);
     if (!s_client) {
         ESP_LOGE(TAG, "Failed to init MQTT client");
         return ESP_FAIL;
     }
 
+    // Регистрация обработчика всех событий MQTT
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID,
                                    mqtt_event_handler, NULL);
     return esp_mqtt_client_start(s_client);
 }
 
+/**
+ * Остановка и уничтожение MQTT-клиента.
+ *
+ * Корректно останавливает клиент, освобождает ресурсы и обнуляет дескриптор.
+ */
 void mqtt_client_stop(void)
 {
     if (s_client) {
@@ -85,6 +133,14 @@ void mqtt_client_stop(void)
     }
 }
 
+/**
+ * Проверка статуса подключения MQTT-клиента.
+ *
+ * Потокобезопасное чтение поля mqtt_connected из plant_data
+ * с захватом мьютекса на 10 мс.
+ *
+ * @return true если клиент подключен к брокеру
+ */
 bool mqtt_client_is_connected(void)
 {
     if (!plant_data_lock(10)) return false;
@@ -93,8 +149,17 @@ bool mqtt_client_is_connected(void)
     return c;
 }
 
-/* ---- Command publishing ---- */
+/* ---- Публикация команд управления ---- */
 
+/**
+ * Публикация команды смены режима работы установки.
+ *
+ * Отправляет строковую команду (например, "AUTO", "IDLE", "MANUAL")
+ * на топик ro_plant/command/mode (QoS 1).
+ *
+ * @param cmd Строка команды режима
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_mode_cmd(const char *cmd)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -103,6 +168,15 @@ esp_err_t mqtt_publish_mode_cmd(const char *cmd)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация битовой маски управления насосами.
+ *
+ * Отправляет JSON {"mask": N} на топик ro_plant/command/pump (QoS 1).
+ * Каждый бит маски соответствует одному насосу.
+ *
+ * @param mask Битовая маска включения насосов
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_pump_mask(uint8_t mask)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -113,6 +187,14 @@ esp_err_t mqtt_publish_pump_mask(uint8_t mask)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация команды включения/выключения дозатора.
+ *
+ * Отправляет JSON {"enabled": true/false} на топик ro_plant/command/doser (QoS 1).
+ *
+ * @param enabled true -- включить дозатор, false -- выключить
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_doser_enable(bool enabled)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -122,6 +204,14 @@ esp_err_t mqtt_publish_doser_enable(bool enabled)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация команды включения/выключения нагревателя.
+ *
+ * Отправляет JSON {"on": true/false} на топик ro_plant/command/heater (QoS 1).
+ *
+ * @param on true -- включить нагреватель, false -- выключить
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_heater(bool on)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -131,8 +221,17 @@ esp_err_t mqtt_publish_heater(bool on)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
-/* ---- Settings publishing ---- */
+/* ---- Публикация настроек (уставок) ---- */
 
+/**
+ * Публикация настроек давления.
+ *
+ * Отправляет JSON с уставками давления на топик ro_plant/settings/pressure (QoS 1).
+ * Поля: p1_max, p3_max, p4_max, filter_dp_warn (все в барах).
+ *
+ * @param s Указатель на структуру настроек давления
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_settings_pressure(const settings_pressure_t *s)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -145,6 +244,15 @@ esp_err_t mqtt_publish_settings_pressure(const settings_pressure_t *s)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация настроек дозатора.
+ *
+ * Отправляет JSON с временами работы на топик ro_plant/settings/doser (QoS 1).
+ * Поля: run_time_min (время работы), cycle_time_min (период цикла).
+ *
+ * @param s Указатель на структуру настроек дозатора
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_settings_doser(const settings_doser_t *s)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -156,6 +264,16 @@ esp_err_t mqtt_publish_settings_doser(const settings_doser_t *s)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация настроек химической промывки мембран.
+ *
+ * Отправляет JSON с параметрами промывки на топик ro_plant/settings/washing (QoS 1).
+ * Поля: target_temp_C, max_temp_C, t_overshoot_C, hysteresis_C (температуры),
+ *       heat_timeout_min, supply_time_min, drain_time_min (времена в минутах).
+ *
+ * @param s Указатель на структуру настроек промывки
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_settings_washing(const settings_washing_t *s)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -172,6 +290,15 @@ esp_err_t mqtt_publish_settings_washing(const settings_washing_t *s)
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
 
+/**
+ * Публикация настроек таймаутов насосов.
+ *
+ * Отправляет JSON с таймаутами на топик ro_plant/settings/timeouts (QoS 1).
+ * Поля: pump_confirm_ms (таймаут подтверждения), pump_ramp_ms (время разгона).
+ *
+ * @param s Указатель на структуру настроек таймаутов
+ * @return ESP_OK при успехе, ESP_ERR_INVALID_STATE если клиент не инициализирован
+ */
 esp_err_t mqtt_publish_settings_timeouts(const settings_timeouts_t *s)
 {
     if (!s_client) return ESP_ERR_INVALID_STATE;
@@ -182,3 +309,4 @@ esp_err_t mqtt_publish_settings_timeouts(const settings_timeouts_t *s)
     int ret = esp_mqtt_client_publish(s_client, MQTT_TOPIC_SET_TIMEOUTS, buf, 0, 1, 0);
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
+#endif /* !LVGL_LIVE_PREVIEW */

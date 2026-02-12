@@ -1,0 +1,153 @@
+# =============================================================================
+# RO Plant - Color Definitions
+# Dark Industrial Theme matching original LVGL UI
+# =============================================================================
+
+color:
+  # --- Backgrounds ---
+  - id: color_bg_dark
+    red: 0x1A
+    green: 0x1A
+    blue: 0x2E
+
+  - id: color_bg_panel
+    red: 0x16
+    green: 0x21
+    blue: 0x3E
+
+  - id: color_bg_widget
+    red: 0x0F
+    green: 0x34
+    blue: 0x60
+
+  # --- Text ---
+  - id: color_text_primary
+    red: 0xE8
+    green: 0xE8
+    blue: 0xE8
+
+  - id: color_text_secondary
+    red: 0x88
+    green: 0x99
+    blue: 0xAA
+
+  - id: color_text_value
+    red: 0x00
+    green: 0xFF
+    blue: 0x88
+
+  # --- Accent ---
+  - id: color_accent
+    red: 0x00
+    green: 0xB4
+    blue: 0xD8
+
+  # --- Button colors ---
+  - id: color_btn_primary
+    red: 0x00
+    green: 0x77
+    blue: 0xB6
+
+  - id: color_btn_danger
+    red: 0xE6
+    green: 0x39
+    blue: 0x46
+
+  - id: color_btn_success
+    red: 0x2D
+    green: 0x6A
+    blue: 0x4F
+
+  - id: color_btn_warning
+    red: 0xFF
+    green: 0xC1
+    blue: 0x07
+
+  # --- State colors ---
+  - id: color_state_idle
+    red: 0x6C
+    green: 0x75
+    blue: 0x7D
+
+  - id: color_state_auto
+    red: 0x28
+    green: 0xA7
+    blue: 0x45
+
+  - id: color_state_washing
+    red: 0x00
+    green: 0x7B
+    blue: 0xFF
+
+  - id: color_state_manual
+    red: 0xFF
+    green: 0xC1
+    blue: 0x07
+
+  - id: color_state_fault
+    red: 0xDC
+    green: 0x35
+    blue: 0x45
+
+  # --- Equipment status ---
+  - id: color_equip_off
+    red: 0x4A
+    green: 0x4A
+    blue: 0x4A
+
+  - id: color_equip_starting
+    red: 0xFF
+    green: 0xD7
+    blue: 0x00
+
+  - id: color_equip_running
+    red: 0x00
+    green: 0xFF
+    blue: 0x88
+
+  - id: color_equip_fault
+    red: 0xFF
+    green: 0x00
+    blue: 0x00
+
+  # --- Alarm categories ---
+  - id: color_alarm_critical
+    red: 0xFF
+    green: 0x00
+    blue: 0x00
+
+  - id: color_alarm_alarm
+    red: 0xFF
+    green: 0x8C
+    blue: 0x00
+
+  - id: color_alarm_warning
+    red: 0xFF
+    green: 0xD7
+    blue: 0x00
+
+  - id: color_alarm_info
+    red: 0x6C
+    green: 0x75
+    blue: 0x7D
+
+  # --- Pipe/Flow ---
+  - id: color_pipe
+    red: 0x00
+    green: 0xB4
+    blue: 0xD8
+
+  - id: color_water
+    red: 0x00
+    green: 0x80
+    blue: 0xD0
+
+  - id: color_white
+    red: 0xFF
+    green: 0xFF
+    blue: 0xFF
+
+  - id: color_black
+    red: 0x00
+    green: 0x00
+    blue: 0x00

@@ -1,0 +1,80 @@
+# =============================================================================
+# RO Plant - Font Definitions
+# Matching original UI font sizes
+# =============================================================================
+
+font:
+  # Small labels
+  - file: "gfonts://Roboto"
+    id: font_12
+    size: 12
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Body text, labels
+  - file: "gfonts://Roboto"
+    id: font_14
+    size: 14
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Standard buttons & values
+  - file: "gfonts://Roboto"
+    id: font_16
+    size: 16
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Section headers
+  - file: "gfonts://Roboto"
+    id: font_18
+    size: 18
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Phase numbers, large labels
+  - file: "gfonts://Roboto"
+    id: font_20
+    size: 20
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Large values
+  - file: "gfonts://Roboto"
+    id: font_28
+    size: 28
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      abcdefghijklmnopqrstuvwxyz°µ³²
+      АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя
+
+  # Temperature display
+  - file: "gfonts://Roboto"
+    id: font_36
+    size: 36
+    glyphs: >-
+      !"%()'+,-./0123456789:;<=>?@
+      abcdefghijklmnopqrstuvwxyz°µ³²
+
+  # MDI icons
+  - file: "gfonts://Material+Symbols+Outlined"
+    id: font_icons_20
+    size: 20
+    glyphs:
+      - "\U000F0029"  # alert
+      - "\U000F009A"  # bell
+      - "\U000F0208"  # eye
+      - "\U000F058E"  # water-pump
+      - "\U000F0238"  # filter
+      - "\U000F050F"  # thermometer
+      - "\U000F029A"  # gauge

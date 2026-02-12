@@ -17,6 +17,7 @@ set(MAIN_SRCS
     "ui/screens/scr_alarms.c"
     "ui/screens/scr_settings.c"
     "ui/screens/scr_diagnostics.c"
+    "ui/lvgl_preview.c"
     "i18n/lang.c"
     "i18n/lang_en.c"
     "i18n/lang_ru.c"

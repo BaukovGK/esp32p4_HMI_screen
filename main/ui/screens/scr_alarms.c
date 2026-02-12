@@ -1,38 +1,47 @@
-/*
- * scr_alarms.c -- Alarms screen
+/**
+ * @file scr_alarms.c
+ * @brief Экран "Аварии" -- активные аварии (вверху) и журнал истории (внизу).
  *
- * Active alarms (top), history journal (bottom), RESET FAULT button.
+ * Верхняя половина: прокручиваемый список активных аварий с цветовой
+ * индикацией категории (CRITICAL / ALARM / WARNING / INFO).
+ * Нижняя половина: журнал истории аварий (кольцевой буфер alarm_ring, 16 записей).
+ * Кнопка СБРОС АВАРИИ видна только в состоянии FAULT.
  *
- * Content area: 1280 x 700 px.
+ * Каждая строка аварии: [цветная полоса] [иконка] [код] [значение] [время] [ACTIVE]
+ *
+ * Данные: alarm_ring_get_active(), alarm_ring_get_history(), plant_data_t.state.
+ * Команда: ui_evt_reset_fault -> MQTT cmd/reset.
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_alarms.h"
 #include "ui_theme.h"
 #include "ui_common.h"
-#include "ui_events.h"
+#include "ui_events.h"   // ui_evt_reset_fault
 #include "ui_fonts.h"
 #include "lang.h"
-#include "alarm_ring.h"
+#include "alarm_ring.h"  // кольцевой буфер аварий
 #include <stdio.h>
 #include <math.h>
 #include <time.h>
 
-/* Maximum entries we'll display */
-#define MAX_ACTIVE  ALARM_RING_SIZE
-#define MAX_HISTORY ALARM_RING_SIZE
+/* Максимальное количество записей для отображения */
+#define MAX_ACTIVE  ALARM_RING_SIZE   // 16
+#define MAX_HISTORY ALARM_RING_SIZE   // 16
 
-/* ---- Widget storage ---- */
+/* ---- Хранилище виджетов ---- */
 
 typedef struct {
-    lv_obj_t *active_list;      /* scrollable container for active alarms */
-    lv_obj_t *history_list;     /* scrollable container for history */
-    lv_obj_t *lbl_active_title;
-    lv_obj_t *lbl_history_title;
-    lv_obj_t *btn_reset;
+    lv_obj_t *active_list;      // Прокручиваемый контейнер активных аварий
+    lv_obj_t *history_list;     // Прокручиваемый контейнер истории
+    lv_obj_t *lbl_active_title; // Заголовок "Active Alarms (N)"
+    lv_obj_t *lbl_history_title;// Заголовок "Alarm History"
+    lv_obj_t *btn_reset;        // Кнопка СБРОС АВАРИИ
 } alarms_widgets_t;
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции ---- */
 
+/** Возвращает цвет для категории аварии (красный/оранжевый/жёлтый/синий). */
 static lv_color_t alarm_cat_color(alarm_category_t cat)
 {
     switch (cat) {
@@ -44,6 +53,7 @@ static lv_color_t alarm_cat_color(alarm_category_t cat)
     }
 }
 
+/** Возвращает символ LVGL для категории аварии. */
 static const char *alarm_cat_icon(alarm_category_t cat)
 {
     switch (cat) {
@@ -55,6 +65,7 @@ static const char *alarm_cat_icon(alarm_category_t cat)
     }
 }
 
+/** Форматирует Unix-время в строку "HH:MM:SS". Если ts <= 0, выводит "--:--:--". */
 static void format_timestamp(char *buf, size_t len, int64_t ts_sec)
 {
     if (ts_sec <= 0) {
@@ -68,6 +79,10 @@ static void format_timestamp(char *buf, size_t len, int64_t ts_sec)
              tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec);
 }
 
+/**
+ * Создаёт одну строку аварии: цветная полоса | иконка | код | значение | время | ACTIVE.
+ * Используется как для списка активных аварий, так и для истории.
+ */
 static lv_obj_t *make_alarm_row(lv_obj_t *parent, const alarm_entry_t *entry)
 {
     lv_obj_t *row = lv_obj_create(parent);
@@ -135,8 +150,9 @@ static lv_obj_t *make_alarm_row(lv_obj_t *parent, const alarm_entry_t *entry)
     return row;
 }
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт экран аварий: два прокручиваемых списка и кнопку сброса. */
 lv_obj_t *scr_alarms_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
@@ -210,8 +226,13 @@ lv_obj_t *scr_alarms_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление ---- */
 
+/**
+ * Перестраивает списки активных аварий и истории.
+ * При каждом вызове очищает контейнеры (lv_obj_clean) и создаёт строки заново.
+ * Управляет видимостью кнопки СБРОС АВАРИИ (только при PLANT_STATE_FAULT).
+ */
 void scr_alarms_update(lv_obj_t *container, const plant_data_t *d)
 {
     alarms_widgets_t *w = (alarms_widgets_t *)lv_obj_get_user_data(container);

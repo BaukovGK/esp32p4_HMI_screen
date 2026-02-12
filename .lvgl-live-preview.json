@@ -1,0 +1,37 @@
+{
+    "mainFile": "main/ui/lvgl_preview.c",
+    "dependencies": [
+        "main/ui/ui_theme.c",
+        "main/ui/ui_common.c",
+        "main/ui/ui_events.c",
+        "main/ui/screens/scr_mnemonic.c",
+        "main/ui/screens/scr_parameters.c",
+        "main/ui/screens/scr_washing.c",
+        "main/ui/screens/scr_alarms.c",
+        "main/ui/screens/scr_settings.c",
+        "main/ui/screens/scr_diagnostics.c",
+        "main/i18n/lang.c",
+        "main/i18n/lang_en.c",
+        "main/i18n/lang_ru.c",
+        "main/fonts/Montserrat_12_4.c",
+        "main/fonts/Montserrat_14_4.c",
+        "main/fonts/Montserrat_16_4.c",
+        "main/fonts/Montserrat_18_4.c",
+        "main/fonts/Montserrat_20_4.c",
+        "main/fonts/Montserrat_22_4.c",
+        "main/fonts/Montserrat_24_4.c",
+        "main/fonts/Montserrat_28_4.c",
+        "main/fonts/Montserrat_36_4.c"
+    ],
+    "includePaths": [
+        "main",
+        "main/board",
+        "main/data",
+        "main/net",
+        "main/mqtt",
+        "main/ui",
+        "main/ui/screens",
+        "main/i18n",
+        "main/fonts"
+    ]
+}

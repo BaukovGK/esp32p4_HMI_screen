@@ -1,3 +1,24 @@
+/**
+ * @file mqtt_parser.c
+ * @brief Парсер входящих MQTT-сообщений для HMI-дисплея RO-установки.
+ *
+ * Маршрутизирует входящие MQTT-сообщения по топикам и разбирает
+ * JSON-payload с помощью библиотеки cJSON. Распарсенные данные
+ * сохраняются в потокобезопасное хранилище plant_data.
+ *
+ * Обрабатываемые топики:
+ * - ro_plant/status/state          -- состояние и подсостояния установки
+ * - ro_plant/status/io             -- цифровые входы/выходы
+ * - ro_plant/status/analog/{P1..P4,T} -- аналоговые датчики
+ * - ro_plant/status/flow/{Q1..Q4}  -- расходомеры
+ * - ro_plant/status/conductivity/{s1..s3} -- кондуктометры
+ * - ro_plant/status/telemetry      -- расчетная телеметрия
+ * - ro_plant/status/doser          -- статус дозатора
+ * - ro_plant/status/interlocks     -- блокировки
+ * - ro_plant/status/diagnostics    -- диагностика контроллера
+ * - ro_plant/alarms                -- аварийные сообщения
+ */
+#ifndef LVGL_LIVE_PREVIEW
 #include "mqtt_parser.h"
 #include "mqtt_topics.h"
 #include "plant_data.h"
@@ -9,17 +30,33 @@
 
 static const char *TAG = "mqtt_parse";
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции извлечения данных из JSON ---- */
 
+/**
+ * Извлечение float-значения из JSON-объекта по ключу.
+ *
+ * @param obj  JSON-объект
+ * @param key  Имя ключа
+ * @param def  Значение по умолчанию (если ключ отсутствует)
+ * @return Значение ключа; NAN если значение null; def если ключ не найден
+ */
 static float json_get_float(const cJSON *obj, const char *key, float def)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (!item) return def;
-    if (cJSON_IsNull(item)) return NAN;
+    if (cJSON_IsNull(item)) return NAN;  // null в JSON -> NAN (датчик недоступен)
     if (cJSON_IsNumber(item)) return (float)item->valuedouble;
     return def;
 }
 
+/**
+ * Извлечение bool-значения из JSON-объекта по ключу.
+ *
+ * @param obj  JSON-объект
+ * @param key  Имя ключа
+ * @param def  Значение по умолчанию (если ключ отсутствует)
+ * @return true/false из JSON, или def если ключ не найден
+ */
 static bool json_get_bool(const cJSON *obj, const char *key, bool def)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
@@ -28,6 +65,14 @@ static bool json_get_bool(const cJSON *obj, const char *key, bool def)
     return def;
 }
 
+/**
+ * Извлечение int-значения из JSON-объекта по ключу.
+ *
+ * @param obj  JSON-объект
+ * @param key  Имя ключа
+ * @param def  Значение по умолчанию (если ключ отсутствует или не число)
+ * @return Целочисленное значение из JSON, или def если ключ не найден
+ */
 static int json_get_int(const cJSON *obj, const char *key, int def)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
@@ -35,6 +80,14 @@ static int json_get_int(const cJSON *obj, const char *key, int def)
     return item->valueint;
 }
 
+/**
+ * Извлечение строкового значения из JSON-объекта по ключу.
+ *
+ * @param obj  JSON-объект
+ * @param key  Имя ключа
+ * @param def  Значение по умолчанию (если ключ отсутствует или не строка)
+ * @return Указатель на строку внутри cJSON-объекта (не копия!), или def
+ */
 static const char *json_get_string(const cJSON *obj, const char *key, const char *def)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
@@ -42,8 +95,13 @@ static const char *json_get_string(const cJSON *obj, const char *key, const char
     return item->valuestring;
 }
 
-/* ---- State parser ---- */
+/* ---- Парсер состояния установки ---- */
 
+/**
+ * Преобразование строки состояния в перечисление plant_state_t.
+ *
+ * Поддерживаемые значения: "IDLE", "AUTO", "WASHING", "MANUAL", "FAULT".
+ */
 static plant_state_t parse_state_enum(const char *s)
 {
     if (!s) return PLANT_STATE_UNKNOWN;
@@ -55,6 +113,13 @@ static plant_state_t parse_state_enum(const char *s)
     return PLANT_STATE_UNKNOWN;
 }
 
+/**
+ * Преобразование строки подсостояния AUTO в перечисление auto_sub_state_t.
+ *
+ * Подсостояния автоматического режима:
+ * STARTING_PUMP1 -> RAMP -> STARTING_PUMP2 -> FILLING_INTERM ->
+ * STARTING_PUMP3 -> RUNNING -> STOPPING
+ */
 static auto_sub_state_t parse_auto_sub(const char *s)
 {
     if (!s) return AUTO_SUB_NONE;
@@ -68,6 +133,12 @@ static auto_sub_state_t parse_auto_sub(const char *s)
     return AUTO_SUB_NONE;
 }
 
+/**
+ * Преобразование строки подсостояния WASHING в перечисление wash_sub_state_t.
+ *
+ * Подсостояния режима промывки:
+ * WAIT_HEAT -> HEATING -> WAIT_SUPPLY -> SUPPLY -> WAIT_DRAIN -> DRAIN -> DONE
+ */
 static wash_sub_state_t parse_wash_sub(const char *s)
 {
     if (!s) return WASH_SUB_NONE;
@@ -81,6 +152,12 @@ static wash_sub_state_t parse_wash_sub(const char *s)
     return WASH_SUB_NONE;
 }
 
+/**
+ * Парсинг сообщения состояния установки (ro_plant/status/state).
+ *
+ * JSON: {"state":"AUTO", "auto_sub":"RUNNING", "wash_sub":null, "fault_flags":0}
+ * Обновляет состояние, подсостояния AUTO/WASHING и флаги неисправностей.
+ */
 static void parse_state(const cJSON *json)
 {
     plant_state_t st = parse_state_enum(json_get_string(json, "state", NULL));
@@ -90,8 +167,14 @@ static void parse_state(const cJSON *json)
     plant_data_set_state(st, asub, wsub, ff);
 }
 
-/* ---- I/O parser ---- */
+/* ---- Парсер цифровых входов/выходов ---- */
 
+/**
+ * Парсинг сообщения I/O (ro_plant/status/io).
+ *
+ * JSON: {"di": 0xFF, "do": 0x0A}
+ * di -- 8-битная маска цифровых входов, do -- 8-битная маска цифровых выходов
+ */
 static void parse_io(const cJSON *json)
 {
     uint8_t di = (uint8_t)json_get_int(json, "di", 0);
@@ -99,8 +182,19 @@ static void parse_io(const cJSON *json)
     plant_data_set_io(di, do_bits);
 }
 
-/* ---- Analog parser ---- */
+/* ---- Парсер аналоговых датчиков ---- */
 
+/**
+ * Парсинг сообщения аналогового датчика (ro_plant/status/analog/{name}).
+ *
+ * JSON: {"value": 3.5, "fault": false}
+ * Суффикс топика определяет тип датчика:
+ * - P1..P4 -- датчики давления (бар)
+ * - T      -- датчик температуры (C)
+ *
+ * @param json JSON-объект сообщения
+ * @param name Суффикс топика (например, "P1", "T")
+ */
 static void parse_analog(const cJSON *json, const char *name)
 {
     float val = json_get_float(json, "value", NAN);
@@ -113,8 +207,19 @@ static void parse_analog(const cJSON *json, const char *name)
     else if (strcmp(name, "T") == 0)  plant_data_set_temperature(val, fault);
 }
 
-/* ---- Flow parser ---- */
+/* ---- Парсер расходомеров ---- */
 
+/**
+ * Парсинг сообщения расходомера (ro_plant/status/flow/{name}).
+ *
+ * JSON: {"flow": 1.2, "volume": 345.6, "ok": true}
+ * - flow   -- мгновенный расход (м3/ч)
+ * - volume -- накопленный объем (м3)
+ * Суффикс топика: Q1..Q4 -> индекс 0..3
+ *
+ * @param json JSON-объект сообщения
+ * @param name Суффикс топика (например, "Q1")
+ */
 static void parse_flow(const cJSON *json, const char *name)
 {
     float f = json_get_float(json, "flow", NAN);
@@ -130,8 +235,19 @@ static void parse_flow(const cJSON *json, const char *name)
     if (idx >= 0) plant_data_set_flow(idx, f, v, ok);
 }
 
-/* ---- Conductivity parser ---- */
+/* ---- Парсер кондуктометров ---- */
 
+/**
+ * Парсинг сообщения кондуктометра (ro_plant/status/conductivity/{name}).
+ *
+ * JSON: {"conductivity": 450.0, "temperature": 25.3, "ok": true}
+ * - conductivity -- удельная электропроводность (мкСм/см)
+ * - temperature  -- температура раствора (C)
+ * Суффикс топика: s1..s3 -> индекс 0..2
+ *
+ * @param json JSON-объект сообщения
+ * @param name Суффикс топика (например, "s1")
+ */
 static void parse_conductivity(const cJSON *json, const char *name)
 {
     float c = json_get_float(json, "conductivity", NAN);
@@ -146,8 +262,19 @@ static void parse_conductivity(const cJSON *json, const char *name)
     if (idx >= 0) plant_data_set_conductivity(idx, c, t, ok);
 }
 
-/* ---- Telemetry parser ---- */
+/* ---- Парсер телеметрии ---- */
 
+/**
+ * Парсинг сообщения расчетной телеметрии (ro_plant/status/telemetry).
+ *
+ * JSON: {"filter_dp":0.5, "stage1_feed":2.1, "recovery2":75.0,
+ *        "recovery_sys":85.0, "sel1":98.5, "sel2":99.1}
+ * - filter_dp    -- перепад давления на фильтре (бар, P1-P2)
+ * - stage1_feed  -- подача на 1 ступень (м3/ч, Q1+Q2)
+ * - recovery2    -- выход 2 ступени (%)
+ * - recovery_sys -- системный выход (%)
+ * - sel1, sel2   -- селективность ступеней (%)
+ */
 static void parse_telemetry(const cJSON *json)
 {
     telemetry_t tel = {
@@ -161,8 +288,15 @@ static void parse_telemetry(const cJSON *json)
     plant_data_set_telemetry(&tel);
 }
 
-/* ---- Doser parser ---- */
+/* ---- Парсер статуса дозатора ---- */
 
+/**
+ * Парсинг сообщения дозатора (ro_plant/status/doser).
+ *
+ * JSON: {"state":"RUNNING", "enabled":true}
+ * - state   -- состояние: "OFF", "RUNNING", "PAUSE"
+ * - enabled -- дозирование разрешено оператором
+ */
 static void parse_doser(const cJSON *json)
 {
     const char *st = json_get_string(json, "state", "OFF");
@@ -174,8 +308,16 @@ static void parse_doser(const cJSON *json)
     plant_data_set_doser(ds, en);
 }
 
-/* ---- Interlocks parser ---- */
+/* ---- Парсер блокировок ---- */
 
+/**
+ * Парсинг сообщения блокировок (ro_plant/status/interlocks).
+ *
+ * JSON: {"flags": 0, "estop": false, "filter_warn": false}
+ * - flags       -- битовая маска активных блокировок
+ * - estop       -- аварийная остановка (кнопка E-STOP)
+ * - filter_warn -- предупреждение о загрязнении фильтра
+ */
 static void parse_interlocks(const cJSON *json)
 {
     uint32_t flags = (uint32_t)json_get_int(json, "flags", 0);
@@ -184,8 +326,15 @@ static void parse_interlocks(const cJSON *json)
     plant_data_set_interlocks(flags, estop, fw);
 }
 
-/* ---- Diagnostics parser ---- */
+/* ---- Парсер диагностики контроллера ---- */
 
+/**
+ * Парсинг сообщения диагностики (ro_plant/status/diagnostics).
+ *
+ * JSON содержит: heap_free, heap_min, uptime_s, wdt_stale,
+ * вложенный объект stack (остатки стеков задач),
+ * вложенный объект modbus (ошибки и статус устройств на шине).
+ */
 static void parse_diagnostics(const cJSON *json)
 {
     diagnostics_t diag = {0};
@@ -194,6 +343,7 @@ static void parse_diagnostics(const cJSON *json)
     diag.uptime_s  = (int64_t)json_get_int(json, "uptime_s", 0);
     diag.wdt_stale = (uint32_t)json_get_int(json, "wdt_stale", 0);
 
+    // Парсинг вложенного объекта остатков стеков задач
     cJSON *stack = cJSON_GetObjectItemCaseSensitive(json, "stack");
     if (stack) {
         diag.stack_modbus   = (uint32_t)json_get_int(stack, "modbus", 0);
@@ -203,10 +353,12 @@ static void parse_diagnostics(const cJSON *json)
         diag.stack_mqtt     = (uint32_t)json_get_int(stack, "mqtt", 0);
     }
 
+    // Парсинг вложенного объекта статистики Modbus
     cJSON *modbus = cJSON_GetObjectItemCaseSensitive(json, "modbus");
     if (modbus) {
         cJSON *errors = cJSON_GetObjectItemCaseSensitive(modbus, "errors");
         cJSON *online = cJSON_GetObjectItemCaseSensitive(modbus, "online");
+        // Перебор 4 устройств на шине Modbus
         for (int i = 0; i < 4; i++) {
             if (errors && cJSON_IsArray(errors)) {
                 cJSON *e = cJSON_GetArrayItem(errors, i);
@@ -222,8 +374,14 @@ static void parse_diagnostics(const cJSON *json)
     plant_data_set_diagnostics(&diag);
 }
 
-/* ---- Alarm parser ---- */
+/* ---- Парсер аварийных сообщений ---- */
 
+/**
+ * Преобразование строки категории аварии в перечисление alarm_category_t.
+ *
+ * Категории (по возрастанию критичности):
+ * INFO -> WARNING -> ALARM -> CRITICAL
+ */
 static alarm_category_t parse_alarm_cat(const char *s)
 {
     if (!s) return ALARM_CAT_INFO;
@@ -233,6 +391,15 @@ static alarm_category_t parse_alarm_cat(const char *s)
     return ALARM_CAT_INFO;
 }
 
+/**
+ * Парсинг аварийного сообщения (ro_plant/alarms).
+ *
+ * JSON: {"id":1, "ts":1700000000, "cat":"ALARM", "code":"HIGH_P1",
+ *        "value":12.5, "active":true}
+ *
+ * Авария добавляется в кольцевой буфер alarm_ring и
+ * выставляется флаг DIRTY_ALARMS для обновления UI.
+ */
 static void parse_alarm(const cJSON *json)
 {
     alarm_entry_t entry = {0};
@@ -245,55 +412,77 @@ static void parse_alarm(const cJSON *json)
     const char *code = json_get_string(json, "code", "UNKNOWN");
     strncpy(entry.code, code, sizeof(entry.code) - 1);
 
+    // Добавление аварии в кольцевой буфер
     alarm_ring_push(&entry);
 
-    /* Also set dirty flag in plant_data */
+    /* Установка флага "грязных" данных для обновления экрана аварий */
     if (plant_data_lock(10)) {
         plant_data_get_mutable()->dirty_flags |= DIRTY_ALARMS;
         plant_data_unlock();
     }
 }
 
-/* ---- Main router ---- */
+/* ---- Главный маршрутизатор входящих MQTT-сообщений ---- */
 
+/**
+ * Маршрутизация и обработка входящего MQTT-сообщения.
+ *
+ * Вызывается из обработчика событий MQTT при получении MQTT_EVENT_DATA.
+ * Копирует топик в локальный буфер, разбирает JSON-payload через cJSON,
+ * определяет тип сообщения по топику и вызывает соответствующий парсер.
+ *
+ * Маршрутизация:
+ * - Точное совпадение: state, io, telemetry, doser, interlocks, diagnostics, alarms
+ * - По префиксу: analog/{name}, flow/{name}, conductivity/{name}
+ *
+ * @param topic     Указатель на строку топика (может быть без терминатора)
+ * @param topic_len Длина строки топика
+ * @param data      Указатель на JSON-payload (может быть без терминатора)
+ * @param data_len  Длина JSON-payload
+ */
 void mqtt_handle_incoming(const char *topic, int topic_len,
                           const char *data, int data_len)
 {
+    // Копирование топика в локальный буфер с нуль-терминатором
     char topic_buf[128];
     int len = (topic_len < (int)sizeof(topic_buf) - 1) ? topic_len : (int)sizeof(topic_buf) - 1;
     memcpy(topic_buf, topic, len);
     topic_buf[len] = '\0';
 
+    // Парсинг JSON-payload (cJSON требует данные с известной длиной)
     cJSON *json = cJSON_ParseWithLength(data, data_len);
     if (!json) {
         ESP_LOGW(TAG, "JSON parse failed for %s", topic_buf);
         return;
     }
 
+    // Маршрутизация по топику
     if (strcmp(topic_buf, MQTT_TOPIC_STATE) == 0) {
-        parse_state(json);
+        parse_state(json);                                          // Состояние установки
     } else if (strcmp(topic_buf, MQTT_TOPIC_IO) == 0) {
-        parse_io(json);
+        parse_io(json);                                             // Цифровые входы/выходы
     } else if (strncmp(topic_buf, MQTT_TOPIC_ANALOG_PREFIX,
                        strlen(MQTT_TOPIC_ANALOG_PREFIX)) == 0) {
-        parse_analog(json, topic_buf + strlen(MQTT_TOPIC_ANALOG_PREFIX));
+        parse_analog(json, topic_buf + strlen(MQTT_TOPIC_ANALOG_PREFIX)); // Аналоговые датчики
     } else if (strncmp(topic_buf, MQTT_TOPIC_FLOW_PREFIX,
                        strlen(MQTT_TOPIC_FLOW_PREFIX)) == 0) {
-        parse_flow(json, topic_buf + strlen(MQTT_TOPIC_FLOW_PREFIX));
+        parse_flow(json, topic_buf + strlen(MQTT_TOPIC_FLOW_PREFIX));     // Расходомеры
     } else if (strncmp(topic_buf, MQTT_TOPIC_COND_PREFIX,
                        strlen(MQTT_TOPIC_COND_PREFIX)) == 0) {
-        parse_conductivity(json, topic_buf + strlen(MQTT_TOPIC_COND_PREFIX));
+        parse_conductivity(json, topic_buf + strlen(MQTT_TOPIC_COND_PREFIX)); // Кондуктометры
     } else if (strcmp(topic_buf, MQTT_TOPIC_TELEMETRY) == 0) {
-        parse_telemetry(json);
+        parse_telemetry(json);                                      // Телеметрия
     } else if (strcmp(topic_buf, MQTT_TOPIC_DOSER) == 0) {
-        parse_doser(json);
+        parse_doser(json);                                          // Дозатор
     } else if (strcmp(topic_buf, MQTT_TOPIC_INTERLOCKS) == 0) {
-        parse_interlocks(json);
+        parse_interlocks(json);                                     // Блокировки
     } else if (strcmp(topic_buf, MQTT_TOPIC_DIAGNOSTICS) == 0) {
-        parse_diagnostics(json);
+        parse_diagnostics(json);                                    // Диагностика
     } else if (strcmp(topic_buf, MQTT_TOPIC_ALARMS) == 0) {
-        parse_alarm(json);
+        parse_alarm(json);                                          // Аварии
     }
 
+    // Освобождение памяти JSON-объекта
     cJSON_Delete(json);
 }
+#endif /* !LVGL_LIVE_PREVIEW */

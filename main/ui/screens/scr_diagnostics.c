@@ -1,65 +1,75 @@
-/*
- * scr_diagnostics.c -- Diagnostics screen
+/**
+ * @file scr_diagnostics.c
+ * @brief Экран "Диагностика" -- системная информация контроллера ESP32-S3.
  *
- * Heap, uptime, MQTT status, Modbus device table, task stack depths.
+ * Три панели:
+ *   1. Система (вверху-слева): свободная heap, минимум heap, uptime, статус MQTT
+ *   2. Modbus (вверху-справа): таблица 4 устройств (Waveshare AI, URZh2KM, SL21-201, SL21-101)
+ *      с колонками: имя, статус (Online/Offline), счётчик ошибок
+ *   3. Стеки задач (внизу): таблица 5 задач (Modbus, IO, Process, Watchdog, MQTT)
+ *      с колонкой свободного места стека в байтах
  *
- * Content area: 1280 x 700 px.
+ * Цветовая индикация:
+ *   - Heap < 32 KB -> красный; heap_min < 16 KB -> красный
+ *   - Стек < 512 B -> красный
+ *   - Modbus ошибки > 0 -> жёлтый
+ *   - MQTT offline -> красный
+ *
+ * Данные: plant_data_t.diagnostics, plant_data_t.mqtt_connected.
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_diagnostics.h"
 #include "ui_theme.h"
-#include "ui_common.h"
+#include "ui_common.h"   // ui_fmt_uptime
 #include "ui_fonts.h"
 #include "lang.h"
 #include <stdio.h>
 #include <inttypes.h>
 
-/* ---- Modbus device names ---- */
+/* ---- Имена Modbus-устройств ---- */
 
 #define MODBUS_DEV_COUNT 4
 
 static const char *modbus_dev_names[MODBUS_DEV_COUNT] = {
-    "Waveshare AI",
-    "URZh2KM",
-    "SL21-201",
-    "SL21-101",
+    "Waveshare AI",  // Модуль аналоговых входов (4-20 мА)
+    "URZh2KM",       // Счётчик расхода
+    "SL21-201",      // Кондуктометр 1
+    "SL21-101",      // Кондуктометр 2
 };
 
-/* ---- Task names ---- */
+/* ---- Имена задач RTOS ---- */
 
 #define TASK_COUNT 5
 
 static const char *task_names[TASK_COUNT] = {
-    "Modbus",
-    "IO",
-    "Process",
-    "Watchdog",
-    "MQTT",
+    "Modbus",    // Задача опроса Modbus
+    "IO",        // Задача обработки дискретных I/O
+    "Process",   // Основная задача технологического процесса
+    "Watchdog",  // Задача сторожевого таймера
+    "MQTT",      // Задача MQTT-клиента
 };
 
-/* ---- Widget storage ---- */
+/* ---- Хранилище виджетов ---- */
 
 typedef struct {
-    /* Heap */
-    lv_obj_t *lbl_heap_free;
-    lv_obj_t *lbl_heap_min;
+    /* Системная информация */
+    lv_obj_t *lbl_heap_free;   // Свободная heap (байт)
+    lv_obj_t *lbl_heap_min;    // Минимум heap за всё время (байт)
+    lv_obj_t *lbl_uptime;      // Время работы (dd:hh:mm:ss)
+    lv_obj_t *lbl_mqtt;        // Статус MQTT (Online/Offline)
 
-    /* Uptime */
-    lv_obj_t *lbl_uptime;
-
-    /* MQTT */
-    lv_obj_t *lbl_mqtt;
-
-    /* Modbus devices: online label + error count label */
+    /* Modbus: статус и счётчик ошибок для каждого устройства */
     lv_obj_t *lbl_mb_online[MODBUS_DEV_COUNT];
     lv_obj_t *lbl_mb_errors[MODBUS_DEV_COUNT];
 
-    /* Task stacks */
+    /* Стеки задач: свободное место */
     lv_obj_t *lbl_stack[TASK_COUNT];
 } diag_widgets_t;
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции ---- */
 
+/** Создаёт информационную панель с заголовком (скруглённый прямоугольник). */
 static lv_obj_t *make_info_panel(lv_obj_t *parent, int32_t x, int32_t y,
                                  int32_t w, int32_t h, const char *title)
 {
@@ -82,6 +92,7 @@ static lv_obj_t *make_info_panel(lv_obj_t *parent, int32_t x, int32_t y,
     return panel;
 }
 
+/** Создаёт строку "ключ: значение" внутри панели. Возвращает lv_label значения. */
 static lv_obj_t *make_kv_row(lv_obj_t *panel, int32_t y_offset,
                              const char *key, const char *initial_val)
 {
@@ -100,8 +111,9 @@ static lv_obj_t *make_kv_row(lv_obj_t *panel, int32_t y_offset,
     return v;
 }
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт экран диагностики: панели системы, Modbus и стеков задач. */
 lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
@@ -201,8 +213,13 @@ lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление ---- */
 
+/**
+ * Обновляет все диагностические показатели.
+ * Читает: diagnostics (heap, uptime, modbus_online/errors, stack_*), mqtt_connected.
+ * Критичные значения подсвечиваются красным (heap < 32KB, стек < 512B, modbus offline).
+ */
 void scr_diagnostics_update(lv_obj_t *container, const plant_data_t *d)
 {
     diag_widgets_t *w = (diag_widgets_t *)lv_obj_get_user_data(container);

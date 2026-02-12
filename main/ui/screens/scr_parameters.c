@@ -1,54 +1,58 @@
-/*
- * scr_parameters.c -- Parameters table screen
+/**
+ * @file scr_parameters.c
+ * @brief Экран "Параметры" -- таблица всех измеренных и расчётных величин.
  *
- * Shows all measured values in sections: Pressure, Temperature,
- * Flow, Conductivity, Calculated telemetry.
+ * Прокручиваемый список с секциями: Давление, Температура, Расход,
+ * Электропроводность, Расчётные показатели.
+ * Каждая строка: Параметр | Значение | Доп.столбец | Статус.
  *
- * Content area: 1280 x 700 px.
+ * Данные: plant_data_t.pressure[], temperature, flow[], conductivity[], telemetry.
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_parameters.h"
 #include "ui_theme.h"
-#include "ui_common.h"
+#include "ui_common.h"   // ui_fmt_float
 #include "ui_fonts.h"
 #include "lang.h"
 #include <stdio.h>
 #include <math.h>
 
-/* ---- Row count per section ---- */
-#define ROWS_PRESSURE     4
-#define ROWS_TEMPERATURE  1
-#define ROWS_FLOW         4
-#define ROWS_COND         3
-#define ROWS_CALC         6
+/* ---- Количество строк в каждой секции ---- */
+#define ROWS_PRESSURE     4  // P1..P4
+#define ROWS_TEMPERATURE  1  // T
+#define ROWS_FLOW         4  // Q1..Q4
+#define ROWS_COND         3  // S1..S3
+#define ROWS_CALC         6  // filter_dp, stage1_feed, recovery2, recovery_sys, sel1, sel2
 
-/* ---- Widget storage ---- */
+/* ---- Хранилище виджетов ---- */
 
 typedef struct {
-    /* Pressure */
+    /* Давление -- значение и статус для каждого канала */
     lv_obj_t *lbl_p_val[ROWS_PRESSURE];
     lv_obj_t *lbl_p_status[ROWS_PRESSURE];
 
-    /* Temperature */
+    /* Температура */
     lv_obj_t *lbl_t_val;
     lv_obj_t *lbl_t_status;
 
-    /* Flow */
-    lv_obj_t *lbl_q_flow[ROWS_FLOW];
-    lv_obj_t *lbl_q_vol[ROWS_FLOW];
+    /* Расход -- мгновенный, накопленный объём, статус */
+    lv_obj_t *lbl_q_flow[ROWS_FLOW];    // м3/ч
+    lv_obj_t *lbl_q_vol[ROWS_FLOW];     // м3 (накопительный)
     lv_obj_t *lbl_q_status[ROWS_FLOW];
 
-    /* Conductivity */
-    lv_obj_t *lbl_c_val[ROWS_COND];
-    lv_obj_t *lbl_c_temp[ROWS_COND];
+    /* Электропроводность -- значение, температура компенсации, статус */
+    lv_obj_t *lbl_c_val[ROWS_COND];     // мкСм/см
+    lv_obj_t *lbl_c_temp[ROWS_COND];    // C (компенсация)
     lv_obj_t *lbl_c_status[ROWS_COND];
 
-    /* Calculated */
+    /* Расчётные показатели */
     lv_obj_t *lbl_calc_val[ROWS_CALC];
 } param_widgets_t;
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции ---- */
 
+/** Создаёт заголовок секции (акцентный цвет, шрифт 18). */
 static lv_obj_t *make_section_header(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *lbl = lv_label_create(parent);
@@ -61,7 +65,7 @@ static lv_obj_t *make_section_header(lv_obj_t *parent, const char *text)
     return lbl;
 }
 
-/* One data row: name | value | extra | status */
+/** Одна строка данных: имя | значение | доп.столбец (объём/температура) | статус. */
 static void make_row(lv_obj_t *parent, const char *name,
                      lv_obj_t **val_out, lv_obj_t **extra_out,
                      lv_obj_t **status_out)
@@ -108,8 +112,9 @@ static void make_row(lv_obj_t *parent, const char *name,
     if (status_out) *status_out = lbl_st;
 }
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт прокручиваемую таблицу параметров с заголовками столбцов и секциями. */
 lv_obj_t *scr_parameters_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
@@ -186,8 +191,13 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление ---- */
 
+/**
+ * Обновляет все строки таблицы параметров.
+ * Для каждого датчика: если fault -- показывает "---" и статус "Обрыв датчика";
+ * иначе -- форматированное значение и статус "OK".
+ */
 void scr_parameters_update(lv_obj_t *container, const plant_data_t *d)
 {
     param_widgets_t *w = (param_widgets_t *)lv_obj_get_user_data(container);

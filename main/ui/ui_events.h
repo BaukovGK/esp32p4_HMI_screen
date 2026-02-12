@@ -1,20 +1,42 @@
+/**
+ * @file ui_events.h
+ * @brief Обработчики событий UI -- callback-функции для кнопок и переключателей.
+ *
+ * Все функции имеют сигнатуру void(lv_event_t*) и подключаются через
+ * lv_obj_add_event_cb() к соответствующим виджетам на экранах.
+ * Команды управления отправляются на основной контроллер (ESP32-S3) через MQTT.
+ */
 #pragma once
 
 #include "lvgl.h"
 
-/* Button event callbacks for mode control */
+/* --- Callback-функции управления режимом работы установки --- */
+
+/** Запуск автоматического режима (с диалогом подтверждения) */
 void ui_evt_start_auto(lv_event_t *e);
+
+/** Остановка установки (с диалогом подтверждения) */
 void ui_evt_stop(lv_event_t *e);
+
+/** Переход в ручной режим (с диалогом подтверждения) */
 void ui_evt_set_manual(lv_event_t *e);
+
+/** Запуск химической промывки (с диалогом подтверждения) */
 void ui_evt_start_washing(lv_event_t *e);
+
+/** Подтверждение этапа промывки (без диалога -- немедленная отправка) */
 void ui_evt_confirm_wash(lv_event_t *e);
+
+/** Сброс аварии (без диалога -- немедленная отправка) */
 void ui_evt_reset_fault(lv_event_t *e);
 
-/* Manual mode pump toggle */
+/* --- Ручное управление оборудованием --- */
+
+/** Переключение насоса в ручном режиме (user_data = индекс бита 0..4) */
 void ui_evt_pump_toggle(lv_event_t *e);
 
-/* Doser enable/disable */
+/** Включение/отключение дозатора антискаланта */
 void ui_evt_doser_toggle(lv_event_t *e);
 
-/* Heater on/off (manual mode) */
+/** Включение/отключение нагревателя (ручной режим) */
 void ui_evt_heater_toggle(lv_event_t *e);

@@ -1,10 +1,21 @@
-/*
- * scr_settings.c -- Settings screen with tabview + numeric keypad
+/**
+ * @file scr_settings.c
+ * @brief Экран "Настройки" -- редактирование уставок с цифровой клавиатурой.
  *
- * Left side  (~800px): 4 tabs (Pressure, Doser, Washing, Timeouts)
- * Right side (~460px): Numeric keypad for touchscreen input
+ * Макет:
+ *   Левая часть (~800 px) -- TabView с 4 вкладками:
+ *     1. Давление: P1 max, P3 max, P4 max, предупреждение dP фильтра
+ *     2. Дозатор: время работы, время цикла
+ *     3. Промывка: целевая/макс. температура, перебег, гистерезис, таймауты
+ *     4. Таймауты: подтверждение насоса, время разгона
+ *   Правая часть (~420 px) -- Экранная цифровая клавиатура (numpad)
  *
- * Content area: 1280 x 700 px.
+ * Поток данных:
+ *   1. Начальные значения загружаются из plant_data_t (кэш уставок) при первом вызове update
+ *   2. Оператор редактирует поля через numpad (тап по полю -> подсветка -> набор)
+ *   3. Нажатие "Применить" -> формирование структуры settings_*_t -> mqtt_publish_settings_*()
+ *
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_settings.h"
@@ -13,48 +24,49 @@
 #include "ui_events.h"
 #include "ui_fonts.h"
 #include "lang.h"
-#include "mqtt_app.h"
-#include "plant_data.h"
+#include "mqtt_app.h"      // mqtt_publish_settings_*
+#include "plant_data.h"    // settings_*_t
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
-/* ---- Widget storage ---- */
+/* ---- Хранилище виджетов ---- */
 
 typedef struct {
-    /* Pressure tab */
-    lv_obj_t *ta_p1_max;
-    lv_obj_t *ta_p3_max;
-    lv_obj_t *ta_p4_max;
-    lv_obj_t *ta_filter_dp_warn;
+    /* Вкладка "Давление" */
+    lv_obj_t *ta_p1_max;          // Макс. давление P1 (bar)
+    lv_obj_t *ta_p3_max;          // Макс. давление P3 (bar)
+    lv_obj_t *ta_p4_max;          // Макс. давление P4 (bar)
+    lv_obj_t *ta_filter_dp_warn;  // Порог предупреждения dP фильтра (bar)
 
-    /* Doser tab */
-    lv_obj_t *ta_run_time;
-    lv_obj_t *ta_cycle_time;
+    /* Вкладка "Дозатор" */
+    lv_obj_t *ta_run_time;    // Время работы дозатора (мин)
+    lv_obj_t *ta_cycle_time;  // Время цикла дозирования (мин)
 
-    /* Washing tab */
-    lv_obj_t *ta_target_temp;
-    lv_obj_t *ta_max_temp;
-    lv_obj_t *ta_overshoot;
-    lv_obj_t *ta_hysteresis;
-    lv_obj_t *ta_heat_timeout;
-    lv_obj_t *ta_supply_time;
-    lv_obj_t *ta_drain_time;
+    /* Вкладка "Промывка" */
+    lv_obj_t *ta_target_temp;   // Целевая температура (C)
+    lv_obj_t *ta_max_temp;      // Максимальная температура (C)
+    lv_obj_t *ta_overshoot;     // Перебег (C)
+    lv_obj_t *ta_hysteresis;    // Гистерезис (C)
+    lv_obj_t *ta_heat_timeout;  // Таймаут нагрева (мин)
+    lv_obj_t *ta_supply_time;   // Время подачи (мин)
+    lv_obj_t *ta_drain_time;    // Время дренажа (мин)
 
-    /* Timeouts tab */
-    lv_obj_t *ta_pump_confirm;
-    lv_obj_t *ta_pump_ramp;
+    /* Вкладка "Таймауты" */
+    lv_obj_t *ta_pump_confirm;  // Таймаут подтверждения насоса (мс)
+    lv_obj_t *ta_pump_ramp;     // Время разгона насоса (мс)
 
-    /* Currently focused textarea (for numpad) */
+    /* Текущее активное текстовое поле (для numpad) */
     lv_obj_t *active_ta;
 } settings_widgets_t;
 
-/* Keep a module-level pointer for event callbacks */
+// Глобальный указатель для обратных вызовов numpad (нужен, т.к. LVGL callback не принимает контекст)
 static settings_widgets_t *s_widgets = NULL;
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции ---- */
 
+/** Обработчик клика по текстовому полю -- подсвечивает выбранное поле для numpad. */
 static void ta_select_cb(lv_event_t *e)
 {
     if (!s_widgets) return;
@@ -71,7 +83,7 @@ static void ta_select_cb(lv_event_t *e)
     lv_obj_set_style_border_width(s_widgets->active_ta, 2, 0);
 }
 
-/* Create a labeled textarea row inside a parent column */
+/** Создаёт строку настройки: подпись (220 px) + текстовое поле (160 px). */
 static lv_obj_t *make_field(lv_obj_t *parent, const char *label_text,
                             const char *initial_value)
 {
@@ -109,6 +121,7 @@ static lv_obj_t *make_field(lv_obj_t *parent, const char *label_text,
     return ta;
 }
 
+/** Читает float из текстового поля (возвращает 0 при пустом поле). */
 static float read_ta_float(lv_obj_t *ta)
 {
     const char *txt = lv_textarea_get_text(ta);
@@ -116,6 +129,7 @@ static float read_ta_float(lv_obj_t *ta)
     return strtof(txt, NULL);
 }
 
+/** Читает int из текстового поля (возвращает 0 при пустом поле). */
 static int read_ta_int(lv_obj_t *ta)
 {
     const char *txt = lv_textarea_get_text(ta);
@@ -123,7 +137,7 @@ static int read_ta_int(lv_obj_t *ta)
     return (int)strtol(txt, NULL, 10);
 }
 
-/* ---- Event: Apply Pressure ---- */
+/** Обработчик "Применить" вкладки "Давление" -- отправляет уставки по MQTT. */
 static void evt_apply_pressure(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
@@ -136,7 +150,7 @@ static void evt_apply_pressure(lv_event_t *e)
     mqtt_publish_settings_pressure(&s);
 }
 
-/* ---- Event: Apply Doser ---- */
+/** Обработчик "Применить" вкладки "Дозатор" -- отправляет уставки по MQTT. */
 static void evt_apply_doser(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
@@ -147,7 +161,7 @@ static void evt_apply_doser(lv_event_t *e)
     mqtt_publish_settings_doser(&s);
 }
 
-/* ---- Event: Apply Washing ---- */
+/** Обработчик "Применить" вкладки "Промывка" -- отправляет уставки по MQTT. */
 static void evt_apply_washing(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
@@ -163,7 +177,7 @@ static void evt_apply_washing(lv_event_t *e)
     mqtt_publish_settings_washing(&s);
 }
 
-/* ---- Event: Apply Timeouts ---- */
+/** Обработчик "Применить" вкладки "Таймауты" -- отправляет уставки по MQTT. */
 static void evt_apply_timeouts(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
@@ -174,7 +188,7 @@ static void evt_apply_timeouts(lv_event_t *e)
     mqtt_publish_settings_timeouts(&s);
 }
 
-/* Make an APPLY button at the bottom of a tab */
+/** Создаёт кнопку "Применить" внизу вкладки настроек. */
 static lv_obj_t *make_apply_btn(lv_obj_t *tab, lv_event_cb_t cb, void *user_data)
 {
     lv_obj_t *btn = lv_button_create(tab);
@@ -194,8 +208,9 @@ static lv_obj_t *make_apply_btn(lv_obj_t *tab, lv_event_cb_t cb, void *user_data
     return btn;
 }
 
-/* ---- Numpad callbacks ---- */
+/* ---- Обратные вызовы цифровой клавиатуры ---- */
 
+/** Добавляет цифру/точку в активное текстовое поле. */
 static void numpad_digit_cb(lv_event_t *e)
 {
     if (!s_widgets || !s_widgets->active_ta) return;
@@ -203,6 +218,7 @@ static void numpad_digit_cb(lv_event_t *e)
     lv_textarea_add_text(s_widgets->active_ta, ch);
 }
 
+/** Удаляет последний символ из активного текстового поля. */
 static void numpad_del_cb(lv_event_t *e)
 {
     (void)e;
@@ -210,6 +226,7 @@ static void numpad_del_cb(lv_event_t *e)
     lv_textarea_delete_char(s_widgets->active_ta);
 }
 
+/** Очищает содержимое активного текстового поля (All Clear). */
 static void numpad_ac_cb(lv_event_t *e)
 {
     (void)e;
@@ -217,6 +234,7 @@ static void numpad_ac_cb(lv_event_t *e)
     lv_textarea_set_text(s_widgets->active_ta, "");
 }
 
+/** Завершает ввод -- снимает фокус с текстового поля. */
 static void numpad_enter_cb(lv_event_t *e)
 {
     (void)e;
@@ -226,8 +244,9 @@ static void numpad_enter_cb(lv_event_t *e)
     lv_obj_remove_state(s_widgets->active_ta, LV_STATE_FOCUS_KEY);
 }
 
-/* ---- Numpad builder ---- */
+/* ---- Построение цифровой клавиатуры ---- */
 
+/** Создаёт одну кнопку numpad с текстом и обратным вызовом. */
 static lv_obj_t *make_numpad_btn(lv_obj_t *parent, const char *text,
                                   int32_t w, int32_t h,
                                   lv_color_t bg, lv_event_cb_t cb, void *ud)
@@ -249,11 +268,12 @@ static lv_obj_t *make_numpad_btn(lv_obj_t *parent, const char *text,
     return btn;
 }
 
-/* Static digit strings for user_data pointers (must outlive callbacks) */
+// Статические строки цифр для передачи в user_data (должны жить дольше callback-ов)
 static const char *s_digits[] = {
     "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "."
 };
 
+/** Создаёт панель цифровой клавиатуры (4x4 кнопки: 0-9, точка, Del, AC, OK). */
 static lv_obj_t *create_numpad(lv_obj_t *parent, int32_t x, int32_t y)
 {
     lv_obj_t *pad = lv_obj_create(parent);
@@ -326,8 +346,9 @@ static lv_obj_t *create_numpad(lv_obj_t *parent, int32_t x, int32_t y)
     return pad;
 }
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт экран настроек: TabView (4 вкладки) + numpad справа. */
 lv_obj_t *scr_settings_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
@@ -416,8 +437,13 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление ---- */
 
+/**
+ * Загружает начальные значения уставок в пустые текстовые поля.
+ * Значения берутся из кэша plant_data_t (set_pressure, set_doser, set_washing, set_timeouts).
+ * Если поле уже заполнено (оператор ввёл значение), оно НЕ перезаписывается.
+ */
 void scr_settings_update(lv_obj_t *container, const plant_data_t *d)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_obj_get_user_data(container);

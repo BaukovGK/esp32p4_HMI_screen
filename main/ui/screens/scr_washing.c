@@ -1,35 +1,47 @@
-/*
- * scr_washing.c -- Washing control screen
+/**
+ * @file scr_washing.c
+ * @brief Экран "Химическая промывка" -- управление 7-фазной промывкой мембран.
  *
- * 7-phase stepper, temperature display, CONFIRM + STOP buttons.
+ * Фазы промывки (шаговый индикатор):
+ *   1. Ожидание нагрева    (WAIT_HEAT)   -- ждём подтверждения оператора
+ *   2. Нагрев              (HEATING)     -- нагреватель работает до целевой температуры
+ *   3. Ожидание подачи     (WAIT_SUPPLY) -- ждём подтверждения оператора
+ *   4. Подача раствора     (SUPPLY)      -- подача хим. раствора в мембраны
+ *   5. Ожидание дренажа    (WAIT_DRAIN)  -- ждём подтверждения оператора
+ *   6. Дренаж              (DRAIN)       -- слив отработанного раствора
+ *   7. Завершено           (DONE)        -- промывка окончена
  *
- * Content area: 1280 x 700 px.
+ * Кнопка ПОДТВЕРДИТЬ видна только на фазах WAIT_* (ожидание оператора).
+ * Данные: plant_data_t.wash_sub, temperature, set_washing, state.
+ * Команды: ui_evt_start_washing, ui_evt_confirm_wash, ui_evt_stop.
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_washing.h"
 #include "ui_theme.h"
 #include "ui_common.h"
-#include "ui_events.h"
+#include "ui_events.h"   // обработчики кнопок (MQTT-команды)
 #include "ui_fonts.h"
-#include "lang.h"
+#include "lang.h"        // мультиязычные строки фаз
 #include <stdio.h>
 #include <math.h>
 
-/* ---- Phase definitions ---- */
+/* ---- Определения фаз промывки ---- */
 
 #define WASH_PHASE_COUNT 7
 
+// Идентификаторы строк для каждой фазы (из lang.h)
 static const str_id_t phase_str_ids[WASH_PHASE_COUNT] = {
-    STR_WASH_WAIT_HEAT,
-    STR_WASH_HEATING,
-    STR_WASH_WAIT_SUPPLY,
-    STR_WASH_SUPPLY,
-    STR_WASH_WAIT_DRAIN,
-    STR_WASH_DRAIN,
-    STR_WASH_DONE,
+    STR_WASH_WAIT_HEAT,    // 0: Ожидание нагрева
+    STR_WASH_HEATING,      // 1: Нагрев
+    STR_WASH_WAIT_SUPPLY,  // 2: Ожидание подачи
+    STR_WASH_SUPPLY,       // 3: Подача
+    STR_WASH_WAIT_DRAIN,   // 4: Ожидание дренажа
+    STR_WASH_DRAIN,        // 5: Дренаж
+    STR_WASH_DONE,         // 6: Завершено
 };
 
-/* Map wash_sub_state_t enum values to 0-based phase index (NONE maps to -1) */
+/** Преобразует enum wash_sub_state_t в 0-based индекс фазы (NONE -> -1). */
 static int wash_sub_to_index(wash_sub_state_t ws)
 {
     switch (ws) {
@@ -44,6 +56,7 @@ static int wash_sub_to_index(wash_sub_state_t ws)
     }
 }
 
+/** Проверяет, является ли фаза "ожиданием" (требует подтверждения оператора). */
 static bool is_wait_phase(wash_sub_state_t ws)
 {
     return ws == WASH_SUB_WAIT_HEAT ||
@@ -51,24 +64,25 @@ static bool is_wait_phase(wash_sub_state_t ws)
            ws == WASH_SUB_WAIT_DRAIN;
 }
 
-/* ---- Widget storage ---- */
+/* ---- Хранилище виджетов ---- */
 
 typedef struct {
-    lv_obj_t *phase_circle[WASH_PHASE_COUNT];
-    lv_obj_t *phase_label[WASH_PHASE_COUNT];
-    lv_obj_t *phase_connector[WASH_PHASE_COUNT - 1]; /* lines between circles */
+    lv_obj_t *phase_circle[WASH_PHASE_COUNT];          // Круги шагового индикатора (7 шт.)
+    lv_obj_t *phase_label[WASH_PHASE_COUNT];           // Подписи фаз под кругами
+    lv_obj_t *phase_connector[WASH_PHASE_COUNT - 1];   // Соединительные линии между кругами
 
-    lv_obj_t *lbl_temp_current;
-    lv_obj_t *lbl_temp_target;
-    lv_obj_t *lbl_phase_name;
+    lv_obj_t *lbl_temp_current;  // Крупная метка "текущая / целевая C"
+    lv_obj_t *lbl_temp_target;   // Подпись "Target: X | Max: Y"
+    lv_obj_t *lbl_phase_name;    // Название текущей фазы (крупный шрифт)
 
-    lv_obj_t *btn_start;
-    lv_obj_t *btn_confirm;
-    lv_obj_t *btn_stop;
+    lv_obj_t *btn_start;    // Кнопка СТАРТ ПРОМЫВКИ (видна вне режима промывки)
+    lv_obj_t *btn_confirm;  // Кнопка ПОДТВЕРДИТЬ (видна на фазах WAIT_*)
+    lv_obj_t *btn_stop;     // Кнопка СТОП (видна во время промывки)
 } washing_widgets_t;
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт экран промывки: шаговый индикатор, панель температуры, кнопки. */
 lv_obj_t *scr_washing_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
@@ -236,8 +250,13 @@ lv_obj_t *scr_washing_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление ---- */
 
+/**
+ * Обновляет шаговый индикатор, температуру и видимость кнопок.
+ * Логика цветов кругов: пройдённые -- зелёные, текущий -- акцент, будущие -- серые.
+ * Кнопка ПОДТВЕРДИТЬ видна только на фазах ожидания (WAIT_HEAT/SUPPLY/DRAIN).
+ */
 void scr_washing_update(lv_obj_t *container, const plant_data_t *d)
 {
     washing_widgets_t *w = (washing_widgets_t *)lv_obj_get_user_data(container);

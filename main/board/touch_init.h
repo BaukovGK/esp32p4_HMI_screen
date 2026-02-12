@@ -1,10 +1,25 @@
+/**
+ * @file touch_init.h
+ * @brief Заголовочный файл модуля инициализации сенсорной панели.
+ *
+ * Объявляет функцию touch_init(), которая настраивает ёмкостный
+ * тач-контроллер GSL3680 по шине I2C и регистрирует его как
+ * устройство ввода в LVGL.
+ */
 #pragma once
 
 #include "lvgl.h"
 
 /**
- * Initialize GSL3680 capacitive touch controller and register with LVGL.
- * @param disp LVGL display to associate touch input with
- * @return LVGL input device handle, or NULL on failure
+ * Инициализация ёмкостного сенсорного контроллера GSL3680 и регистрация в LVGL.
+ *
+ * Выполняет следующие шаги:
+ * - Инициализация шины I2C (I2C0, SDA=GPIO7, SCL=GPIO8, 400 кГц)
+ * - Создание I2C panel IO для связи с тач-контроллером
+ * - Настройка GSL3680 (разрешение, GPIO сброса/прерывания, зеркалирование)
+ * - Регистрация устройства ввода (touch) в LVGL
+ *
+ * @param disp Указатель на LVGL-дисплей, к которому привязывается тач-ввод
+ * @return Указатель на LVGL input device (lv_indev_t*), или NULL при ошибке
  */
 lv_indev_t *touch_init(lv_display_t *disp);

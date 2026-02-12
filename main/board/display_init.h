@@ -1,10 +1,24 @@
+/**
+ * @file display_init.h
+ * @brief Заголовочный файл модуля инициализации дисплея.
+ *
+ * Объявляет единственную функцию display_init(), которая настраивает
+ * всю цепочку: подсветку, MIPI DSI шину, JD9365 панель и LVGL-порт.
+ */
 #pragma once
 
 #include "lvgl.h"
 
 /**
- * Initialize MIPI DSI display with JD9365 driver and LVGL port.
- * Sets landscape orientation (1280x800) via software rotation.
- * @return LVGL display handle, or NULL on failure
+ * Инициализация дисплея MIPI DSI с контроллером JD9365 и регистрация в LVGL.
+ *
+ * Выполняет следующие шаги:
+ * - Настройка ШИМ-подсветки через LEDC
+ * - Включение питания PHY через внутренний LDO
+ * - Создание шины MIPI DSI и DBI-интерфейса для команд
+ * - Инициализация панели JD9365 (800x1280, RGB565)
+ * - Регистрация дисплея в LVGL с программным поворотом на 270 градусов (ландшафт 1280x800)
+ *
+ * @return Указатель на LVGL-дисплей (lv_display_t*), или NULL при ошибке
  */
 lv_display_t *display_init(void);

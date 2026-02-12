@@ -1,104 +1,131 @@
-/*
- * scr_mnemonic.c -- Main P&ID mnemonic screen
+/**
+ * @file scr_mnemonic.c
+ * @brief Мнемосхема -- главный экран P&ID-схемы процесса обратного осмоса.
  *
- * Process flow (left to right):
- *   Source Tank → Feed Pump → Stage1 Pump → [Membrane 1] →
- *   Intermediate Tank → Stage2 Pump → [Membrane 2] → Clean Water Tank
+ * Технологический поток (слева направо):
+ *   Исходная ёмкость -> Подающий насос -> Насос 1й ступени -> [Мембрана 1] ->
+ *   Промежуточная ёмкость -> Насос 2й ступени -> [Мембрана 2] -> Ёмкость пермеата
  *
- * Content area: 1280 x 700 px.
+ * Экран содержит:
+ *   - Три ёмкости с анимацией уровня (по дискретным входам DI)
+ *   - Три насоса + нагреватель + дозатор (индикаторы-круги)
+ *   - Две мембраны с трубопроводами концентрата/рецикла
+ *   - Выноски датчиков: P1-P4 (давление), T (температура), Q1-Q4 (расход), σ1-σ3 (электропроводность)
+ *   - Панель телеметрии (степень извлечения, перепад на фильтре)
+ *   - Метка текущего состояния (IDLE/AUTO/WASHING/MANUAL/FAULT)
+ *   - 5 кнопок управления: СТАРТ, СТОП, РУЧНОЙ, ПРОМЫВКА, СБРОС АВАРИИ
+ *
+ * Область содержимого: 1280 x 700 px.
  */
 
 #include "scr_mnemonic.h"
 #include "ui_theme.h"
 #include "ui_common.h"
-#include "ui_events.h"
+#include "ui_events.h"    // обработчики кнопок (MQTT-команды)
 #include "ui_fonts.h"
-#include "lang.h"
+#include "lang.h"         // мультиязычные строки
 #include <stdio.h>
 #include <math.h>
 
-/* ---- DI / DO bit definitions ---- */
+/* ---- Определения битов DI / DO ---- */
 
-/* Digital inputs (di byte) */
-#define DI_SOURCE_LOW   (1u << 0)   /* DI1: source tank low level   */
-#define DI_SOURCE_HIGH  (1u << 1)   /* DI2: source tank high level  */
-#define DI_INTERM_LOW   (1u << 2)   /* DI3: intermediate tank low   */
-#define DI_INTERM_HIGH  (1u << 3)   /* DI4: intermediate tank high  */
-#define DI_PUMP1_RUN    (1u << 4)   /* DI5: feed pump confirm       */
-#define DI_PUMP2_RUN    (1u << 5)   /* DI6: stage1 pump confirm     */
-#define DI_PUMP3_RUN    (1u << 6)   /* DI7: stage2 pump confirm     */
-#define DI_PERMEATE_HIGH (1u << 7)  /* DI8: permeate tank high      */
+/* Дискретные входы (байт di) -- от модуля Waveshare AI */
+#define DI_SOURCE_LOW (1u << 0)    /* DI1: нижний уровень исходной ёмкости  */
+#define DI_SOURCE_HIGH (1u << 1)   /* DI2: верхний уровень исходной ёмкости */
+#define DI_INTERM_LOW (1u << 2)    /* DI3: нижний уровень промежуточной     */
+#define DI_INTERM_HIGH (1u << 3)   /* DI4: верхний уровень промежуточной    */
+#define DI_PUMP1_RUN (1u << 4)     /* DI5: подтверждение работы насоса 1    */
+#define DI_PUMP2_RUN (1u << 5)     /* DI6: подтверждение работы насоса 2    */
+#define DI_PUMP3_RUN (1u << 6)     /* DI7: подтверждение работы насоса 3    */
+#define DI_PERMEATE_HIGH (1u << 7) /* DI8: верхний уровень ёмкости пермеата */
 
-/* Digital outputs (do_bits byte) */
-#define DO_PUMP1        (1u << 0)
-#define DO_PUMP2        (1u << 1)
-#define DO_PUMP3        (1u << 2)
-#define DO_HEATER       (1u << 3)
-#define DO_DOSER        (1u << 4)
-#define DO_VALVE1       (1u << 5)
-#define DO_VALVE2       (1u << 6)
+/* Дискретные выходы (байт do_bits) */
+#define DO_PUMP1 (1u << 0)   // Подающий насос
+#define DO_PUMP2 (1u << 1)   // Насос 1й ступени
+#define DO_PUMP3 (1u << 2)   // Насос 2й ступени
+#define DO_HEATER (1u << 3)  // Нагреватель
+#define DO_DOSER (1u << 4)   // Дозатор
+#define DO_VALVE1 (1u << 5)  // Клапан 1
+#define DO_VALVE2 (1u << 6)  // Клапан 2
 
-/* ---- Schema layout constants ---- */
+/* ---- Константы разметки схемы ---- */
 
-#define PIPE_Y      250     /* Centerline of horizontal pipes */
-#define TANK_TOP    115     /* Top of tank rectangles */
-#define TANK_W      110     /* Tank width */
-#define TANK_H      250     /* Tank height */
-#define PUMP_D       60     /* Pump circle diameter */
-#define MEMB_W       70     /* Membrane block width */
-#define MEMB_H      110     /* Membrane block height */
+#define PIPE_Y 250   // Осевая линия горизонтальных трубопроводов (px)
+#define TANK_TOP 115 // Верхний край прямоугольников ёмкостей
+#define TANK_W 80    // Ширина ёмкости
+#define TANK_H 220   // Высота ёмкости
+#define PUMP_D 60    // Диаметр круга-индикатора насоса
+#define MEMB_W 100   // Ширина блока мембраны
+#define MEMB_H 80    // Высота блока мембраны
 
-/* X positions of process elements (left to right, filling 1280px) */
-#define X_SRC        15     /* Source tank */
-#define X_FEED      210     /* Feed pump */
-#define X_STG1      355     /* Stage 1 pump */
-#define X_M1        500     /* Membrane 1 */
-#define X_INT       655     /* Intermediate tank */
-#define X_STG2      850     /* Stage 2 pump */
-#define X_M2        995     /* Membrane 2 */
-#define X_CLN      1150     /* Clean water tank → right edge at 1260 */
+/* X-координаты элементов процесса (слева направо, заполняя 1280 px) */
+#define X_SRC 15   // Исходная ёмкость
+#define X_FEED 210 // Подающий насос
+#define X_STG1 355 // Насос 1й ступени
+#define X_M1 500   // Мембрана 1
+#define X_INT 655  // Промежуточная ёмкость
+#define X_STG2 850 // Насос 2й ступени
+#define X_M2 995   // Мембрана 2
+#define X_CLN 1150 // Ёмкость чистой воды (правый край ~1260)
 
-/* ---- Widget storage (user_data on container) ---- */
+/* Отрисовка трубопроводов */
+#define PIPE_THICK 14                            // Толщина основного трубопровода
+#define PIPE_COLOR       lv_color_hex(0x4A6A8A)  // Цвет основного трубопровода
+#define PIPE_BORDER_CLR  lv_color_hex(0x3A5270)  // Цвет обводки трубопровода
+#define PIPE_RECYCLE_THICK 8                     // Толщина линий концентрата/рецикла
+#define PIPE_RECYCLE_CLR lv_color_hex(0x055BB0)  // Цвет линий рецикла
 
-typedef struct {
-    /* Tanks: fill rectangle inside an outline */
-    lv_obj_t *tank_source;
-    lv_obj_t *tank_source_fill;
-    lv_obj_t *tank_interm;
-    lv_obj_t *tank_interm_fill;
-    lv_obj_t *tank_permeate;
-    lv_obj_t *tank_permeate_fill;
+/* Выноска датчика (callout box) */
+#define SBOX_H 30 // Высота выноски
 
-    /* Equipment indicators (circles) */
-    lv_obj_t *ind_pump1;
-    lv_obj_t *ind_pump2;
-    lv_obj_t *ind_pump3;
-    lv_obj_t *ind_heater;
-    lv_obj_t *ind_doser;
+/* ---- Хранилище виджетов (сохраняется в user_data корневого контейнера) ---- */
 
-    /* Sensor value labels */
-    lv_obj_t *lbl_p[4];
-    lv_obj_t *lbl_t;
-    lv_obj_t *lbl_q[4];
-    lv_obj_t *lbl_s[3];
+typedef struct
+{
+    /* Ёмкости: рамка + прямоугольник заполнения внутри */
+    lv_obj_t *tank_source;       // Исходная ёмкость (рамка)
+    lv_obj_t *tank_source_fill;  // Индикатор уровня исходной ёмкости
+    lv_obj_t *tank_interm;       // Промежуточная ёмкость (рамка)
+    lv_obj_t *tank_interm_fill;  // Индикатор уровня промежуточной
+    lv_obj_t *tank_permeate;     // Ёмкость пермеата (рамка)
+    lv_obj_t *tank_permeate_fill;// Индикатор уровня пермеата
 
-    /* Telemetry */
-    lv_obj_t *lbl_recovery;
-    lv_obj_t *lbl_filter_dp;
+    /* Индикаторы оборудования (круги) */
+    lv_obj_t *ind_pump1;   // Подающий насос
+    lv_obj_t *ind_pump2;   // Насос 1й ступени
+    lv_obj_t *ind_pump3;   // Насос 2й ступени
+    lv_obj_t *ind_heater;  // Нагреватель
+    lv_obj_t *ind_doser;   // Дозатор
 
-    /* Mode / state label */
+    /* Метки значений датчиков */
+    lv_obj_t *lbl_p[4];   // Давление P1..P4 (bar)
+    lv_obj_t *lbl_t;       // Температура T (C)
+    lv_obj_t *lbl_q[4];   // Расход Q1..Q4 (m3/h)
+    lv_obj_t *lbl_s[3];   // Электропроводность S1..S3 (uS/cm)
+
+    /* Телеметрия */
+    lv_obj_t *lbl_recovery;  // Степень извлечения системы (%)
+    lv_obj_t *lbl_filter_dp; // Перепад давления на фильтре (bar)
+
+    /* Метка текущего режима / состояния */
     lv_obj_t *lbl_state;
 
-    /* Control buttons */
-    lv_obj_t *btn_start;
-    lv_obj_t *btn_stop;
-    lv_obj_t *btn_manual;
-    lv_obj_t *btn_washing;
-    lv_obj_t *btn_reset;
+    /* Кнопки управления */
+    lv_obj_t *btn_start;   // СТАРТ АВТО -> ui_evt_start_auto -> MQTT cmd/start_auto
+    lv_obj_t *btn_stop;    // СТОП -> ui_evt_stop -> MQTT cmd/stop
+    lv_obj_t *btn_manual;  // РУЧНОЙ -> ui_evt_set_manual -> MQTT cmd/manual
+    lv_obj_t *btn_washing; // ПРОМЫВКА -> ui_evt_start_washing -> MQTT cmd/start_wash
+    lv_obj_t *btn_reset;   // СБРОС АВАРИИ -> ui_evt_reset_fault -> MQTT cmd/reset
 } mnemonic_widgets_t;
 
-/* ---- Helpers ---- */
+/* ---- Вспомогательные функции построения виджетов ---- */
 
+/**
+ * Создаёт виджет ёмкости: прямоугольная рамка + внутренний индикатор заполнения.
+ * Уровень растёт снизу вверх. Подпись рисуется под ёмкостью.
+ * @param fill_out  [out] указатель на объект-заполнитель для обновления высоты
+ * @return рамка ёмкости (lv_obj)
+ */
 static lv_obj_t *make_tank(lv_obj_t *parent, int32_t x, int32_t y,
                            int32_t w, int32_t h, const char *title,
                            lv_obj_t **fill_out)
@@ -138,6 +165,11 @@ static lv_obj_t *make_tank(lv_obj_t *parent, int32_t x, int32_t y,
     return frame;
 }
 
+/**
+ * Создаёт круглый индикатор оборудования (насос, нагреватель, дозатор).
+ * Цвет фона меняется в scr_mnemonic_update в зависимости от DO/DI/fault.
+ * Подпись рисуется под кругом.
+ */
 static lv_obj_t *make_indicator(lv_obj_t *parent, int32_t x, int32_t y,
                                 int32_t diameter, const char *title)
 {
@@ -162,17 +194,52 @@ static lv_obj_t *make_indicator(lv_obj_t *parent, int32_t x, int32_t y,
     return circle;
 }
 
+/** Горизонтальный основной трубопровод на осевой линии PIPE_Y. */
 static void make_pipe(lv_obj_t *parent, int32_t x, int32_t length)
 {
     lv_obj_t *pipe = lv_obj_create(parent);
     lv_obj_remove_style_all(pipe);
-    lv_obj_set_size(pipe, length, 3);
-    lv_obj_set_pos(pipe, x, PIPE_Y - 1);
-    lv_obj_set_style_bg_color(pipe, COLOR_TEXT_SECONDARY, 0);
-    lv_obj_set_style_bg_opa(pipe, LV_OPA_60, 0);
+    lv_obj_set_size(pipe, length, PIPE_THICK);
+    lv_obj_set_pos(pipe, x, PIPE_Y - PIPE_THICK / 2);
+    lv_obj_set_style_bg_color(pipe, PIPE_COLOR, 0);
+    lv_obj_set_style_bg_opa(pipe, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(pipe, PIPE_BORDER_CLR, 0);
+    lv_obj_set_style_border_width(pipe, 1, 0);
+    lv_obj_set_style_radius(pipe, 3, 0);
     lv_obj_remove_flag(pipe, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+/** Вертикальный основной трубопровод (cx -- центр по X). */
+static void make_pipe_v(lv_obj_t *parent, int32_t cx, int32_t y,
+                        int32_t height)
+{
+    lv_obj_t *pipe = lv_obj_create(parent);
+    lv_obj_remove_style_all(pipe);
+    lv_obj_set_size(pipe, PIPE_THICK, height);
+    lv_obj_set_pos(pipe, cx - PIPE_THICK / 2, y);
+    lv_obj_set_style_bg_color(pipe, PIPE_COLOR, 0);
+    lv_obj_set_style_bg_opa(pipe, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(pipe, PIPE_BORDER_CLR, 0);
+    lv_obj_set_style_border_width(pipe, 1, 0);
+    lv_obj_set_style_radius(pipe, 3, 0);
+    lv_obj_remove_flag(pipe, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/** Тонкий трубопровод для линий концентрата / рецикла (горизонтальный или вертикальный). */
+static void make_pipe_thin(lv_obj_t *parent, int32_t x, int32_t y,
+                           int32_t w, int32_t h)
+{
+    lv_obj_t *pipe = lv_obj_create(parent);
+    lv_obj_remove_style_all(pipe);
+    lv_obj_set_size(pipe, w, h);
+    lv_obj_set_pos(pipe, x, y);
+    lv_obj_set_style_bg_color(pipe, PIPE_RECYCLE_CLR, 0);
+    lv_obj_set_style_bg_opa(pipe, LV_OPA_70, 0);
+    lv_obj_set_style_radius(pipe, 2, 0);
+    lv_obj_remove_flag(pipe, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+/** Создаёт блок мембраны (прямоугольник с названием внутри и подписью снизу). */
 static void make_membrane(lv_obj_t *parent, int32_t x,
                           const char *short_name, const char *title)
 {
@@ -202,17 +269,67 @@ static void make_membrane(lv_obj_t *parent, int32_t x,
     lv_obj_set_style_text_font(tlbl, UI_FONT_12, 0);
 }
 
-static lv_obj_t *make_sensor_label(lv_obj_t *parent, int32_t x, int32_t y,
-                                   const char *prefix)
+/**
+ * Создаёт выноску датчика -- прямоугольник с текстом и линией-выноской к трубопроводу.
+ *
+ *  bx, by   -- левый верхний угол рамки выноски
+ *  pipe_x   -- координата X, где линия-выноска касается основного трубопровода
+ *  text     -- начальный текст метки (например "P1: ---")
+ *
+ * Возвращает lv_label внутри рамки (для обновления значения).
+ */
+static lv_obj_t *make_sensor_box(lv_obj_t *parent, int32_t bx, int32_t by,
+                                 int32_t pipe_x, const char *text)
 {
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, prefix);
-    lv_obj_set_pos(lbl, x, y);
+    /* Bordered callout box */
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, LV_SIZE_CONTENT, SBOX_H);
+    lv_obj_set_pos(box, bx, by);
+    lv_obj_set_style_bg_color(box, COLOR_BG_PANEL, 0);
+    lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(box, COLOR_ACCENT, 0);
+    lv_obj_set_style_border_width(box, 1, 0);
+    lv_obj_set_style_border_opa(box, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(box, 4, 0);
+    lv_obj_set_style_pad_hor(box, 8, 0);
+    lv_obj_set_style_pad_ver(box, 5, 0);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Value label */
+    lv_obj_t *lbl = lv_label_create(box);
+    lv_label_set_text(lbl, text);
     lv_obj_set_style_text_color(lbl, COLOR_TEXT_VALUE, 0);
-    lv_obj_set_style_text_font(lbl, UI_FONT_16, 0);
+    lv_obj_set_style_text_font(lbl, UI_FONT_14, 0);
+    lv_obj_center(lbl);
+
+    /* Leader line (thin vertical bar from box edge to pipe) */
+    int32_t ly, lh;
+    if (by + SBOX_H / 2 < PIPE_Y) {
+        /* Box above pipe */
+        ly = by + SBOX_H;
+        lh = (PIPE_Y - PIPE_THICK / 2) - ly;
+    } else {
+        /* Box below pipe */
+        ly = PIPE_Y + PIPE_THICK / 2;
+        lh = by - ly;
+    }
+    if (lh > 0) {
+        lv_obj_t *leader = lv_obj_create(parent);
+        lv_obj_remove_style_all(leader);
+        lv_obj_set_size(leader, 2, lh);
+        lv_obj_set_pos(leader, pipe_x, ly);
+        lv_obj_set_style_bg_color(leader, COLOR_ACCENT, 0);
+        lv_obj_set_style_bg_opa(leader, LV_OPA_40, 0);
+        lv_obj_remove_flag(leader, LV_OBJ_FLAG_SCROLLABLE);
+        /* Push leader line behind all other objects */
+        lv_obj_move_to_index(leader, 0);
+    }
+
     return lbl;
 }
 
+/** Создаёт кнопку управления режимом (СТАРТ/СТОП/РУЧНОЙ/ПРОМЫВКА/СБРОС). */
 static lv_obj_t *make_mode_btn(lv_obj_t *parent, int32_t x, int32_t y,
                                int32_t w, int32_t h,
                                const char *text, lv_color_t bg,
@@ -231,14 +348,16 @@ static lv_obj_t *make_mode_btn(lv_obj_t *parent, int32_t x, int32_t y,
     lv_obj_set_style_text_font(lbl, UI_FONT_16, 0);
     lv_obj_center(lbl);
 
-    if (cb) {
+    if (cb)
+    {
         lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     }
     return btn;
 }
 
-/* ---- Create ---- */
+/* ---- Создание экрана ---- */
 
+/** Создаёт полную мнемосхему: ёмкости, насосы, мембраны, трубопроводы, датчики, кнопки. */
 lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
 {
     /* Root container - fills content area */
@@ -281,47 +400,114 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     make_membrane(cont, X_M2, "M2", lang_str(STR_LBL_MEMBRANE_2));
 
     /* ---- Heater & Doser (below pipe, near intermediate area) ---- */
-    w->ind_heater = make_indicator(cont, X_INT + TANK_W + 15,
-                                   PIPE_Y + PUMP_D / 2 + 20, 45,
+    w->ind_heater = make_indicator(cont,  X_SRC + 110,
+                                   PIPE_Y - 140, 50,
                                    lang_str(STR_LBL_HEATER));
-    w->ind_doser  = make_indicator(cont, X_FEED + PUMP_D + 15,
-                                   PIPE_Y + PUMP_D / 2 + 20, 45,
-                                   lang_str(STR_LBL_DOSER));
+    w->ind_doser = make_indicator(cont, X_FEED + PUMP_D +120,
+                                  PIPE_Y - 180, 50,
+                                  lang_str(STR_LBL_DOSER));
 
-    /* ---- Connecting pipes (at PIPE_Y centerline) ---- */
-    make_pipe(cont, X_SRC + TANK_W,     X_FEED - (X_SRC + TANK_W));     /* Source → Feed   */
-    make_pipe(cont, X_FEED + PUMP_D,    X_STG1 - (X_FEED + PUMP_D));    /* Feed → Stage1   */
-    make_pipe(cont, X_STG1 + PUMP_D,    X_M1 - (X_STG1 + PUMP_D));     /* Stage1 → M1     */
-    make_pipe(cont, X_M1 + MEMB_W,      X_INT - (X_M1 + MEMB_W));      /* M1 → Interm     */
-    make_pipe(cont, X_INT + TANK_W,     X_STG2 - (X_INT + TANK_W));     /* Interm → Stage2 */
-    make_pipe(cont, X_STG2 + PUMP_D,    X_M2 - (X_STG2 + PUMP_D));     /* Stage2 → M2     */
-    make_pipe(cont, X_M2 + MEMB_W,      X_CLN - (X_M2 + MEMB_W));      /* M2 → Clean      */
+    /* ---- Main horizontal pipes (at PIPE_Y centerline) ---- */
+    make_pipe(cont, X_SRC + TANK_W, X_FEED - (X_SRC + TANK_W));   /* Source → Feed   */
+    make_pipe(cont, X_FEED + PUMP_D, X_STG1 - (X_FEED + PUMP_D)); /* Feed → Stage1   */
+    make_pipe(cont, X_STG1 + PUMP_D, X_M1 - (X_STG1 + PUMP_D));   /* Stage1 → M1     */
+    make_pipe(cont, X_M1 + MEMB_W, X_INT - (X_M1 + MEMB_W));      /* M1 → Interm     */
+    make_pipe(cont, X_INT + TANK_W, X_STG2 - (X_INT + TANK_W));   /* Interm → Stage2 */
+    make_pipe(cont, X_STG2 + PUMP_D, X_M2 - (X_STG2 + PUMP_D));   /* Stage2 → M2     */
+    make_pipe(cont, X_M2 + MEMB_W, X_CLN - (X_M2 + MEMB_W));      /* M2 → Clean      */
 
-    /* ---- Pressure labels P1-P4 (above pipe, near measurement points) ---- */
-    w->lbl_p[0] = make_sensor_label(cont, X_FEED, PIPE_Y - PUMP_D / 2 - 22,  "P1: ---");
-    w->lbl_p[1] = make_sensor_label(cont, X_M1,   PIPE_Y - MEMB_H / 2 - 22,  "P2: ---");
-    w->lbl_p[2] = make_sensor_label(cont, X_STG2,  PIPE_Y - PUMP_D / 2 - 22,  "P3: ---");
-    w->lbl_p[3] = make_sensor_label(cont, X_M2,   PIPE_Y - MEMB_H / 2 - 22,  "P4: ---");
+    /*
+     * ---- Concentrate / recycle pipes (thin, below main process) ----
+     *
+     * M1 concentrate → down → recycle Q2 back to before Stage1
+     *                       → drain (right)
+     * M2 concentrate → down → recycle Q4 back to Intermediate
+     */
+    {
+        int32_t conc_y = PIPE_Y + MEMB_H / 2 + 15; /* just below membranes */
+        int32_t m1_cx = X_M1 + MEMB_W / 2;         /* M1 center-x          */
+        int32_t m2_cx = X_M2 + MEMB_W / 2;         /* M2 center-x          */
+        int32_t rejoin_x = X_STG1 - 15;             /* recycle Q2 merge     */
+        int32_t rejoin2_x = X_INT + TANK_W + 10;    /* recycle Q4 merge     */
+
+        /* M1: vertical down from M1 bottom */
+        make_pipe_thin(cont, m1_cx - PIPE_RECYCLE_THICK / 2,
+                       PIPE_Y + MEMB_H / 2,
+                       PIPE_RECYCLE_THICK, conc_y - (PIPE_Y + MEMB_H / 2));
+        /* M1: horizontal left → recycle Q2 to before Stage1 */
+        make_pipe_thin(cont, rejoin_x, conc_y,
+                       m1_cx - rejoin_x, PIPE_RECYCLE_THICK);
+        /* M1: vertical up at rejoin point to main pipe */
+        make_pipe_thin(cont, rejoin_x - PIPE_RECYCLE_THICK / 2,
+                       PIPE_Y + PIPE_THICK / 2,
+                       PIPE_RECYCLE_THICK,
+                       conc_y - (PIPE_Y + PIPE_THICK / 2));
+        /* M1: horizontal right → drain stub */
+        make_pipe_thin(cont, m1_cx, conc_y,
+                       60, PIPE_RECYCLE_THICK);
+        /* "Дренаж" label */
+        lv_obj_t *lbl_drain = lv_label_create(cont);
+        lv_label_set_text(lbl_drain, LV_SYMBOL_RIGHT " Дренаж");
+        lv_obj_set_pos(lbl_drain, m1_cx + 72, conc_y + PIPE_RECYCLE_THICK +6);
+        lv_obj_set_style_text_color(lbl_drain, PIPE_RECYCLE_CLR, 0);
+        lv_obj_set_style_text_font(lbl_drain, UI_FONT_12, 0);
+
+        /* M2: vertical down from M2 bottom */
+        make_pipe_thin(cont, m2_cx - PIPE_RECYCLE_THICK / 2,
+                       PIPE_Y + MEMB_H / 2,
+                       PIPE_RECYCLE_THICK, conc_y - (PIPE_Y + MEMB_H / 2));
+        /* M2: horizontal left → recycle Q4 to Intermediate */
+        make_pipe_thin(cont, rejoin2_x, conc_y,
+                       m2_cx - rejoin2_x, PIPE_RECYCLE_THICK);
+        /* M2: vertical up at rejoin point to main pipe */
+        make_pipe_thin(cont, rejoin2_x - PIPE_RECYCLE_THICK / 2,
+                       PIPE_Y + PIPE_THICK / 2,
+                       PIPE_RECYCLE_THICK,
+                       conc_y - (PIPE_Y + PIPE_THICK / 2));
+
+        /* Recycle labels */
+        lv_obj_t *lbl_q2 = lv_label_create(cont);
+        lv_label_set_text(lbl_q2, "Q2 рецикл");
+        lv_obj_set_pos(lbl_q2, rejoin_x + 20, conc_y + PIPE_RECYCLE_THICK + 2);
+        lv_obj_set_style_text_color(lbl_q2, PIPE_RECYCLE_CLR, 0);
+        lv_obj_set_style_text_font(lbl_q2, UI_FONT_12, 0);
+
+        lv_obj_t *lbl_q4r = lv_label_create(cont);
+        lv_label_set_text(lbl_q4r, "Q4 рецикл");
+        lv_obj_set_pos(lbl_q4r, rejoin2_x + 20, conc_y + PIPE_RECYCLE_THICK + 2);
+        lv_obj_set_style_text_color(lbl_q4r, PIPE_RECYCLE_CLR, 0);
+        lv_obj_set_style_text_font(lbl_q4r, UI_FONT_12, 0);
+    }
 
     /*
      * ============================================================
-     *  SENSOR VALUES  (y = 295 .. 370)
+     *  SENSOR CALLOUT BOXES
+     *
+     *  Above pipe (y=20):  P1, P2, P3, P4
+     *  Below pipe (y=365): T, Q1, Q2, Q3, Q4
+     *  Below pipe (y=400): σ1, σ2, σ3
      * ============================================================
      */
 
-    /* Temperature */
-    w->lbl_t = make_sensor_label(cont, 30, 400, "T: ---");
+    /* Pressure P1-P4 (above pipe, y=20) */
+    w->lbl_p[0] = make_sensor_box(cont, 195, 20, 240, "P1: ---");
+    w->lbl_p[1] = make_sensor_box(cont, 310, 20, 340, "P2: ---");
+    w->lbl_p[2] = make_sensor_box(cont, 430, 20, 460, "P3: ---");
+    w->lbl_p[3] = make_sensor_box(cont, 920, 20, 950, "P4: ---");
 
-    /* Flow Q1..Q4 */
-    w->lbl_q[0] = make_sensor_label(cont, 220, 400, "Q1: ---");
-    w->lbl_q[1] = make_sensor_label(cont, 440, 400, "Q2: ---");
-    w->lbl_q[2] = make_sensor_label(cont, 700, 400, "Q3: ---");
-    w->lbl_q[3] = make_sensor_label(cont, 960, 400, "Q4: ---");
+    /* Temperature (below pipe) */
+    w->lbl_t = make_sensor_box(cont, 30, 365, 150, "T: ---");
 
-    /* Conductivity S1..S3 */
-    w->lbl_s[0] = make_sensor_label(cont, 30,  435, "S1: ---");
-    w->lbl_s[1] = make_sensor_label(cont, 440, 435, "S2: ---");
-    w->lbl_s[2] = make_sensor_label(cont, 850, 435, "S3: ---");
+    /* Flow Q1-Q4 (below pipe, y=365) */
+    w->lbl_q[0] = make_sensor_box(cont, 195, 365, 240, "Q1: ---");
+    w->lbl_q[1] = make_sensor_box(cont, 475, 365, 555, "Q2: ---");
+    w->lbl_q[2] = make_sensor_box(cont, 1060, 365, 1120, "Q3: ---");
+    w->lbl_q[3] = make_sensor_box(cont, 920, 365, 975, "Q4: ---");
+
+    /* Conductivity σ1-σ3 (below pipe, y=400) */
+    w->lbl_s[0] = make_sensor_box(cont, 195, 400, 240, "σ1: ---");
+    w->lbl_s[1] = make_sensor_box(cont, 580, 400, 630, "σ2: ---");
+    w->lbl_s[2] = make_sensor_box(cont, 1060, 400, 1120, "σ3: ---");
 
     /*
      * ============================================================
@@ -383,7 +569,7 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     int32_t btn_w = 230;
     /* 5 buttons: 5*230 + 4*16 = 1214, margin = (1280-1214)/2 = 33 */
     int32_t btn_x0 = 33;
-    int32_t btn_y = 700 - 50 - btn_h;   /* 50px from bottom edge */
+    int32_t btn_y = 700 - 50 - btn_h; /* 50px from bottom edge */
 
     w->btn_start = make_mode_btn(cont, btn_x0, btn_y, btn_w, btn_h,
                                  lang_str(STR_BTN_START_AUTO),
@@ -412,40 +598,67 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     return cont;
 }
 
-/* ---- Update ---- */
+/* ---- Обновление виджетов ---- */
 
+/**
+ * Устанавливает цвет индикатора оборудования по логике:
+ *   fault           -> красный (FAULT)
+ *   DO=1, DI=1      -> зелёный (работает)
+ *   DO=1, DI=0      -> жёлтый  (запускается, нет подтверждения)
+ *   DO=0            -> серый   (выключен)
+ */
 static void set_indicator_color(lv_obj_t *ind, bool do_on, bool di_confirm, bool fault)
 {
     lv_color_t c;
-    if (fault) {
+    if (fault)
+    {
         c = COLOR_PUMP_FAULT;
-    } else if (do_on && di_confirm) {
+    }
+    else if (do_on && di_confirm)
+    {
         c = COLOR_PUMP_RUNNING;
-    } else if (do_on && !di_confirm) {
+    }
+    else if (do_on && !di_confirm)
+    {
         c = COLOR_PUMP_STARTING;
-    } else {
+    }
+    else
+    {
         c = COLOR_PUMP_OFF;
     }
     lv_obj_set_style_bg_color(ind, c, 0);
 }
 
+/**
+ * Устанавливает высоту индикатора заполнения ёмкости по дискретным датчикам уровня.
+ * low=0, high=0 -> пусто (5%); low=1, high=0 -> средний (50%); low=1, high=1 -> полная (100%)
+ */
 static void set_tank_fill(lv_obj_t *fill, lv_obj_t *frame, bool low, bool high)
 {
-    /* low=0 high=0 -> empty;  low=1 high=0 -> mid;  low=1 high=1 -> full */
     int pct = 0;
-    if (low && high)       pct = 100;
-    else if (low && !high) pct = 50;
-    else                   pct = 5;   /* minimum visible sliver */
+    if (low && high)
+        pct = 100;
+    else if (low && !high)
+        pct = 50;
+    else
+        pct = 5; /* minimum visible sliver */
 
     int32_t tank_h = lv_obj_get_height(frame) - 4;
     int32_t fill_h = (tank_h * pct) / 100;
     lv_obj_set_height(fill, fill_h);
 }
 
+/**
+ * Обновляет все виджеты мнемосхемы по данным plant_data_t.
+ * Вызывается периодически (~500 мс) из UI-таймера.
+ * Читает: di, do_bits, pressure[], temperature, flow[], conductivity[],
+ *          telemetry, doser, state.
+ */
 void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
 {
     mnemonic_widgets_t *w = (mnemonic_widgets_t *)lv_obj_get_user_data(container);
-    if (!w) return;
+    if (!w)
+        return;
 
     char buf[48];
     uint8_t di = d->di;
@@ -470,21 +683,27 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
 
     /* Heater: no DI confirm, just DO state */
     lv_obj_set_style_bg_color(w->ind_heater,
-        (do_bits & DO_HEATER) ? COLOR_PUMP_RUNNING : COLOR_PUMP_OFF, 0);
+                              (do_bits & DO_HEATER) ? COLOR_PUMP_RUNNING : COLOR_PUMP_OFF, 0);
 
     /* Doser */
     lv_color_t doser_c = COLOR_PUMP_OFF;
-    if (d->doser.state == DOSER_STATE_RUNNING) doser_c = COLOR_PUMP_RUNNING;
-    else if (d->doser.state == DOSER_STATE_PAUSE) doser_c = COLOR_PUMP_STARTING;
+    if (d->doser.state == DOSER_STATE_RUNNING)
+        doser_c = COLOR_PUMP_RUNNING;
+    else if (d->doser.state == DOSER_STATE_PAUSE)
+        doser_c = COLOR_PUMP_STARTING;
     lv_obj_set_style_bg_color(w->ind_doser, doser_c, 0);
 
     /* ---- Pressure labels P1..P4 ---- */
-    for (int i = 0; i < 4; i++) {
-        if (d->pressure[i].fault) {
+    for (int i = 0; i < 4; i++)
+    {
+        if (d->pressure[i].fault)
+        {
             snprintf(buf, sizeof(buf), "P%d: FAULT", i + 1);
             lv_label_set_text(w->lbl_p[i], buf);
             lv_obj_set_style_text_color(w->lbl_p[i], COLOR_PUMP_FAULT, 0);
-        } else {
+        }
+        else
+        {
             ui_fmt_float(buf, sizeof(buf), d->pressure[i].value, 2,
                          lang_str(STR_UNIT_BAR));
             char full[64];
@@ -495,10 +714,13 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
     }
 
     /* Temperature */
-    if (d->temperature.fault) {
+    if (d->temperature.fault)
+    {
         lv_label_set_text(w->lbl_t, "T: FAULT");
         lv_obj_set_style_text_color(w->lbl_t, COLOR_PUMP_FAULT, 0);
-    } else {
+    }
+    else
+    {
         ui_fmt_float(buf, sizeof(buf), d->temperature.value, 1,
                      lang_str(STR_UNIT_CELSIUS));
         char full[64];
@@ -508,25 +730,27 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
     }
 
     /* Flow Q1..Q4 */
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 4; i++)
+    {
         ui_fmt_float(buf, sizeof(buf), d->flow[i].flow, 2,
                      lang_str(STR_UNIT_M3H));
         char full[64];
         snprintf(full, sizeof(full), "Q%d: %s", i + 1, buf);
         lv_label_set_text(w->lbl_q[i], full);
         lv_obj_set_style_text_color(w->lbl_q[i],
-            d->flow[i].ok ? COLOR_TEXT_VALUE : COLOR_PUMP_FAULT, 0);
+                                    d->flow[i].ok ? COLOR_TEXT_VALUE : COLOR_PUMP_FAULT, 0);
     }
 
     /* Conductivity S1..S3 */
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++)
+    {
         ui_fmt_float(buf, sizeof(buf), d->conductivity[i].conductivity, 1,
                      lang_str(STR_UNIT_USCM));
         char full[64];
-        snprintf(full, sizeof(full), "S%d: %s", i + 1, buf);
+        snprintf(full, sizeof(full), "σ%d: %s", i + 1, buf);
         lv_label_set_text(w->lbl_s[i], full);
         lv_obj_set_style_text_color(w->lbl_s[i],
-            d->conductivity[i].ok ? COLOR_TEXT_VALUE : COLOR_PUMP_FAULT, 0);
+                                    d->conductivity[i].ok ? COLOR_TEXT_VALUE : COLOR_PUMP_FAULT, 0);
     }
 
     /* ---- Telemetry ---- */
@@ -540,22 +764,44 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *d)
 
     /* ---- State label ---- */
     const char *state_text;
-    lv_color_t  state_color;
-    switch (d->state) {
-        case PLANT_STATE_IDLE:    state_text = lang_str(STR_MODE_IDLE);    state_color = COLOR_STATE_IDLE;    break;
-        case PLANT_STATE_AUTO:    state_text = lang_str(STR_MODE_AUTO);    state_color = COLOR_STATE_AUTO;    break;
-        case PLANT_STATE_WASHING: state_text = lang_str(STR_MODE_WASHING); state_color = COLOR_STATE_WASHING; break;
-        case PLANT_STATE_MANUAL:  state_text = lang_str(STR_MODE_MANUAL);  state_color = COLOR_STATE_MANUAL;  break;
-        case PLANT_STATE_FAULT:   state_text = lang_str(STR_MODE_FAULT);   state_color = COLOR_STATE_FAULT;   break;
-        default:                  state_text = lang_str(STR_MODE_UNKNOWN); state_color = COLOR_STATE_IDLE;    break;
+    lv_color_t state_color;
+    switch (d->state)
+    {
+    case PLANT_STATE_IDLE:
+        state_text = lang_str(STR_MODE_IDLE);
+        state_color = COLOR_STATE_IDLE;
+        break;
+    case PLANT_STATE_AUTO:
+        state_text = lang_str(STR_MODE_AUTO);
+        state_color = COLOR_STATE_AUTO;
+        break;
+    case PLANT_STATE_WASHING:
+        state_text = lang_str(STR_MODE_WASHING);
+        state_color = COLOR_STATE_WASHING;
+        break;
+    case PLANT_STATE_MANUAL:
+        state_text = lang_str(STR_MODE_MANUAL);
+        state_color = COLOR_STATE_MANUAL;
+        break;
+    case PLANT_STATE_FAULT:
+        state_text = lang_str(STR_MODE_FAULT);
+        state_color = COLOR_STATE_FAULT;
+        break;
+    default:
+        state_text = lang_str(STR_MODE_UNKNOWN);
+        state_color = COLOR_STATE_IDLE;
+        break;
     }
     lv_label_set_text(w->lbl_state, state_text);
     lv_obj_set_style_text_color(w->lbl_state, state_color, 0);
 
     /* ---- RESET button visibility ---- */
-    if (d->state == PLANT_STATE_FAULT) {
+    if (d->state == PLANT_STATE_FAULT)
+    {
         lv_obj_remove_flag(w->btn_reset, LV_OBJ_FLAG_HIDDEN);
-    } else {
+    }
+    else
+    {
         lv_obj_add_flag(w->btn_reset, LV_OBJ_FLAG_HIDDEN);
     }
 }

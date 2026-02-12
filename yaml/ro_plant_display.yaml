@@ -1,0 +1,97 @@
+# =============================================================================
+# RO Plant Control Display - ESPHome Configuration
+# ESP32-P4 with JD9365 MIPI DSI 1280x800 Display
+# Dark Industrial Theme - Reverse Osmosis Plant Monitoring & Control
+# =============================================================================
+
+substitutions:
+  device_name: ro-plant-display
+  friendly_name: "RO Plant Display"
+  mqtt_broker: "192.168.1.100"
+  mqtt_port: "1883"
+  mqtt_user: ""
+  mqtt_password: ""
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: dio
+
+esp32:
+  board: esp32-s3-devkitc-1  # adjust for actual P4 board
+  framework:
+    type: esp-idf
+    version: "5.3.0"
+
+# --- Logging ---
+logger:
+  level: INFO
+
+# --- Network ---
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${device_name}-AP"
+    password: "fallback123"
+
+# --- OTA & API ---
+ota:
+  platform: esphome
+
+api:
+  encryption:
+    key: !secret api_key
+
+# --- MQTT ---
+mqtt:
+  broker: ${mqtt_broker}
+  port: ${mqtt_port}
+  username: ${mqtt_user}
+  password: ${mqtt_password}
+  id: mqtt_client
+  on_connect:
+    - lambda: |-
+        id(mqtt_connected) = true;
+  on_disconnect:
+    - lambda: |-
+        id(mqtt_connected) = false;
+
+# --- Globals ---
+globals:
+  - id: mqtt_connected
+    type: bool
+    initial_value: "false"
+  - id: current_screen
+    type: int
+    initial_value: "0"
+  - id: plant_state
+    type: int
+    initial_value: "0"
+  - id: auto_substate
+    type: int
+    initial_value: "0"
+  - id: wash_substate
+    type: int
+    initial_value: "0"
+  - id: fault_flags
+    type: uint32_t
+    initial_value: "0"
+  - id: di_bits
+    type: uint16_t
+    initial_value: "0"
+  - id: do_bits
+    type: uint16_t
+    initial_value: "0"
+  - id: lang_ru
+    type: bool
+    initial_value: "true"
+
+# --- Include modular files ---
+packages:
+  sensors: !include ro_plant_sensors.yaml
+  display_config: !include ro_plant_display_hw.yaml
+  fonts: !include ro_plant_fonts.yaml
+  colors: !include ro_plant_colors.yaml
+  screens: !include ro_plant_screens.yaml
