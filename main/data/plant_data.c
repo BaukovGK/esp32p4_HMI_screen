@@ -18,7 +18,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_log.h"
 #include <string.h>
+
+static const char *TAG = "plant_data";
 
 // Единственный экземпляр данных установки (статический, модульная область видимости)
 static plant_data_t s_data;
@@ -26,11 +31,60 @@ static plant_data_t s_data;
 // Мьютекс для защиты s_data от одновременного доступа из разных задач
 static SemaphoreHandle_t s_mutex = NULL;
 
+/* ---- NVS: пространство имён и ключи для хранения уставок ---- */
+#define NVS_NAMESPACE   "ro_settings"
+#define NVS_KEY_PRESS   "set_press"
+#define NVS_KEY_DOSER   "set_doser"
+#define NVS_KEY_WASH    "set_wash"
+#define NVS_KEY_TMOUT   "set_tmout"
+
+/**
+ * Загрузка уставок из NVS. Если ключ отсутствует — значение остаётся по умолчанию.
+ * Вызывается из plant_data_init() после заполнения значений по умолчанию.
+ */
+static void settings_load_from_nvs(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        ESP_LOGI(TAG, "NVS: no saved settings, using defaults");
+        return;
+    }
+
+    size_t len, expected;
+
+    expected = sizeof(s_data.set_pressure);
+    len = expected;
+    if (nvs_get_blob(nvs, NVS_KEY_PRESS, &s_data.set_pressure, &len) == ESP_OK && len == expected) {
+        ESP_LOGI(TAG, "NVS: loaded pressure settings");
+    }
+
+    expected = sizeof(s_data.set_doser);
+    len = expected;
+    if (nvs_get_blob(nvs, NVS_KEY_DOSER, &s_data.set_doser, &len) == ESP_OK && len == expected) {
+        ESP_LOGI(TAG, "NVS: loaded doser settings");
+    }
+
+    expected = sizeof(s_data.set_washing);
+    len = expected;
+    if (nvs_get_blob(nvs, NVS_KEY_WASH, &s_data.set_washing, &len) == ESP_OK && len == expected) {
+        ESP_LOGI(TAG, "NVS: loaded washing settings");
+    }
+
+    expected = sizeof(s_data.set_timeouts);
+    len = expected;
+    if (nvs_get_blob(nvs, NVS_KEY_TMOUT, &s_data.set_timeouts, &len) == ESP_OK && len == expected) {
+        ESP_LOGI(TAG, "NVS: loaded timeout settings");
+    }
+
+    nvs_close(nvs);
+}
+
 /**
  * Инициализация хранилища данных.
  * Обнуляет структуру, устанавливает NAN для аналоговых каналов
  * (чтобы UI отображал "---" до получения первых данных),
- * заполняет уставки значениями по умолчанию и создаёт мьютекс.
+ * заполняет уставки значениями по умолчанию, загружает сохранённые из NVS
+ * и создаёт мьютекс.
  * Вызывается один раз при старте приложения до запуска задач MQTT и UI.
  */
 void plant_data_init(void)
@@ -50,7 +104,7 @@ void plant_data_init(void)
         s_data.conductivity[i].temperature = NAN;
     }
 
-    // Уставки по умолчанию (до получения актуальных от контроллера)
+    // Уставки по умолчанию (до получения актуальных от контроллера или NVS)
     s_data.set_pressure = (settings_pressure_t){
         .p1_max = 5.5f, .p3_max = 35.0f, .p4_max = 8.0f, .filter_dp_warn = 1.0f
     };
@@ -65,6 +119,9 @@ void plant_data_init(void)
     s_data.set_timeouts = (settings_timeouts_t){
         .pump_confirm_ms = 3000, .pump_ramp_ms = 15000
     };
+
+    // Перезапись значениями из NVS (если были сохранены ранее)
+    settings_load_from_nvs();
 
     // Создание мьютекса; configASSERT остановит систему если памяти не хватило
     s_mutex = xSemaphoreCreateMutex();
@@ -256,5 +313,67 @@ void plant_data_set_mqtt_status(bool connected)
     s_data.mqtt_connected = connected;
     s_data.dirty_flags |= DIRTY_STATE;
     xSemaphoreGive(s_mutex);
+}
+
+/* ---- Сохранение уставок в NVS (вызывается из UI-задачи после "Применить") ---- */
+
+/**
+ * Вспомогательная функция: записывает blob в NVS и делает commit.
+ * NVS-операции выполняются ВНЕ мьютекса, т.к. flash-запись может занять время.
+ */
+static void nvs_save_blob(const char *key, const void *data, size_t len)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, key, data, len);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    } else {
+        ESP_LOGE(TAG, "NVS: failed to open for writing");
+    }
+}
+
+void plant_data_save_settings_pressure(const settings_pressure_t *s)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_data.set_pressure = *s;
+    s_data.dirty_flags |= DIRTY_STATE;
+    xSemaphoreGive(s_mutex);
+
+    nvs_save_blob(NVS_KEY_PRESS, s, sizeof(*s));
+    ESP_LOGI(TAG, "NVS: saved pressure settings");
+}
+
+void plant_data_save_settings_doser(const settings_doser_t *s)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_data.set_doser = *s;
+    s_data.dirty_flags |= DIRTY_STATE;
+    xSemaphoreGive(s_mutex);
+
+    nvs_save_blob(NVS_KEY_DOSER, s, sizeof(*s));
+    ESP_LOGI(TAG, "NVS: saved doser settings");
+}
+
+void plant_data_save_settings_washing(const settings_washing_t *s)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_data.set_washing = *s;
+    s_data.dirty_flags |= DIRTY_STATE;
+    xSemaphoreGive(s_mutex);
+
+    nvs_save_blob(NVS_KEY_WASH, s, sizeof(*s));
+    ESP_LOGI(TAG, "NVS: saved washing settings");
+}
+
+void plant_data_save_settings_timeouts(const settings_timeouts_t *s)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_data.set_timeouts = *s;
+    s_data.dirty_flags |= DIRTY_STATE;
+    xSemaphoreGive(s_mutex);
+
+    nvs_save_blob(NVS_KEY_TMOUT, s, sizeof(*s));
+    ESP_LOGI(TAG, "NVS: saved timeout settings");
 }
 #endif /* !LVGL_LIVE_PREVIEW */

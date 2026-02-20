@@ -2,5 +2,7 @@ dependencies:
   lvgl/lvgl: "~9.2"
   espressif/esp_lvgl_port: "^2"
   espressif/esp_lcd_touch: "^1.1"
+  espressif/esp_lcd_touch_gt911: "^1"
+  waveshare/esp_lcd_jd9365_10_1: "*"
   idf:
     version: ">=5.3.0"

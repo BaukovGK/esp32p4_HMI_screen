@@ -1,69 +1,179 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- | -------- |
+| Supported Targets | ESP32-P4 |
+| ----------------- | -------- |
 
-# Blink Example
+# RO Plant HMI Display (ro_hmi)
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+HMI-дисплей на базе Waveshare ESP32-P4-NANO для управления и мониторинга установки обратного осмоса (RO).
+Взаимодействует с основным контроллером (ESP32-S3) по MQTT через Ethernet.
 
-This example demonstrates how to blink a LED by using the GPIO driver or using the [led_strip](https://components.espressif.com/component/espressif/led_strip) library if the LED is addressable e.g. [WS2812](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf). The `led_strip` library is installed via [component manager](main/idf_component.yml).
+## Аппаратная платформа
 
-## How to Use Example
+| Компонент | Описание |
+|-----------|----------|
+| Плата | Waveshare ESP32-P4-NANO |
+| MCU | ESP32-P4 (dual-core RISC-V, 400 MHz) |
+| Дисплей | 10.1" IPS, MIPI DSI 2-lane (контроллер JD9365), нативное разрешение 800x1280 (портрет), программный поворот 270° в 1280x800 (ландшафт) |
+| MCU дисплея | I2C адрес 0x45 — преинициализация (reg 0x95, 0x96) выполняется внутри компонента waveshare автоматически |
+| Тачскрин | Ёмкостный GT911, I2C 0x5D, режим POLLING (прерывания вызывают WDT crash — GT911 удерживает INT LOW после инициализации) |
+| Сеть | Ethernet RMII (IP101 PHY, RST = GPIO51) |
+| Память | 16 MB Flash QIO + 32 MB PSRAM 200 MHz |
+| Аудио | ES8311 на I2C 0x18 (не используется в текущей прошивке) |
 
-Before project configuration and build, be sure to set the correct chip target using `idf.py set-target <chip_name>`.
+## Карта GPIO
 
-### Hardware Required
+| GPIO | Назначение |
+|------|------------|
+| 7 | I2C SDA (общая шина: MCU 0x45, GT911 0x5D, ES8311 0x18) |
+| 8 | I2C SCL |
+| 21 | GT911 INT (не используется — режим polling) |
+| 22 | GT911 RST |
+| 23 | Подсветка LCD (LEDC PWM, 20 кГц) |
+| 27 | Аппаратный сброс LCD-панели |
+| 31 | Ethernet MDC |
+| 51 | Ethernet PHY RST |
+| 52 | Ethernet MDIO |
 
-* A development board with normal LED or addressable LED on-board (e.g., ESP32-S3-DevKitC, ESP32-C6-DevKitC etc.)
-* A USB cable for Power supply and programming
+## Шина I2C
 
-See [Development Boards](https://www.espressif.com/en/products/devkits) for more information about it.
+Общая шина I2C (I2C_NUM_1, 400 кГц) инициализируется в `board_i2c_init()` до инициализации дисплея и тачскрина.
+Три устройства на шине: 0x18 (ES8311), 0x45 (MCU дисплея), 0x5D (GT911).
 
-### Configure the Project
+## Архитектура ПО
 
-Open the project configuration menu (`idf.py menuconfig`).
-
-In the `Example Configuration` menu:
-
-* Select the LED type in the `Blink LED type` option.
-  * Use `GPIO` for regular LED
-  * Use `LED strip` for addressable LED
-* If the LED type is `LED strip`, select the backend peripheral
-  * `RMT` is only available for ESP targets with RMT peripheral supported
-  * `SPI` is available for all ESP targets
-* Set the GPIO number used for the signal in the `Blink GPIO number` option.
-* Set the blinking period in the `Blink period in ms` option.
-
-### Build and Flash
-
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-As you run the example, you will see the LED blinking, according to the previously defined period. For the addressable LED, you can also change the LED color by setting the `led_strip_set_pixel(led_strip, 0, 16, 16, 16);` (LED Strip, Pixel Number, Red, Green, Blue) with values from 0 to 255 in the [source file](main/blink_example_main.c).
-
-```text
-I (315) example: Example configured to blink addressable LED!
-I (325) example: Turning the LED OFF!
-I (1325) example: Turning the LED ON!
-I (2325) example: Turning the LED OFF!
-I (3325) example: Turning the LED ON!
-I (4325) example: Turning the LED OFF!
-I (5325) example: Turning the LED ON!
-I (6325) example: Turning the LED OFF!
-I (7325) example: Turning the LED ON!
-I (8325) example: Turning the LED OFF!
+```
+app_main.c                  -- точка входа
+board/
+  board_i2c.c/.h            -- общая шина I2C (master, 400 кГц)
+  board.h                   -- аппаратные константы (GPIO, разрешения, частоты)
+  display_init.c/.h         -- дисплей MIPI DSI (JD9365), LVGL, подсветка
+  touch_init.c/.h           -- тачскрин GT911 (I2C, режим polling)
+net/
+  eth_init.c/.h             -- Ethernet (EMAC + IP101 PHY, DHCP)
+mqtt/
+  mqtt_app.c/.h             -- MQTT-клиент
+  mqtt_parser.c/.h          -- парсер JSON-сообщений
+  mqtt_topics.h             -- определения MQTT-топиков
+data/
+  plant_data.c/.h           -- модель данных установки
+  alarm_ring.c/.h           -- кольцевой буфер аварий
+i18n/
+  lang.c/.h                 -- модуль локализации
+  lang_strings.h            -- ключи строк
+  lang_ru.c, lang_en.c      -- переводы RU/EN
+ui/
+  ui_main.c/.h              -- главный UI: навигация, верхняя панель, переключение экранов
+  ui_common.c/.h            -- общие виджеты
+  ui_events.c/.h            -- обработчики UI-событий
+  ui_theme.c/.h             -- цвета, шрифты, константы макета
+  lvgl_preview.c            -- заглушки для LVGL preview mode (без железа)
+  screens/
+    scr_mnemonic.c/.h       -- мнемосхема
+    scr_parameters.c/.h     -- таблица аналоговых параметров
+    scr_alarms.c/.h         -- активные аварии + история
+    scr_washing.c/.h        -- управление промывкой мембран
+    scr_settings.c/.h       -- настройки/уставки
+    scr_diagnostics.c/.h    -- диагностика
+fonts/
+  Montserrat_*.c            -- растеризованные шрифты Montserrat (12-36pt, 4bpp)
 ```
 
-Note: The color order could be different according to the LED model.
+## Последовательность инициализации
 
-The pixel number indicates the pixel position in the LED strip. For a single LED, use 0.
+```
+app_main()
+  ├── nvs_flash_init()
+  ├── board_i2c_init()              // Общая шина I2C (SDA=7, SCL=8, 400 кГц)
+  │     └── board_i2c_scan()        // i2cdetect-сканирование (0x18, 0x45, 0x5D)
+  ├── display_init()
+  │     ├── backlight_init()        // LEDC PWM GPIO23
+  │     ├── LDO ch3 → 2.5V         // Питание MIPI DSI PHY
+  │     ├── MIPI DSI bus (2 lanes)
+  │     ├── JD9365 panel init       // Преинит MCU 0x45 внутри компонента
+  │     ├── panel_reset()           // Аппаратный сброс через GPIO27
+  │     ├── LVGL port init
+  │     ├── lvgl_port_add_disp_dsi  // avoid_tearing=false, sw_rotate=true
+  │     ├── rotation 270°           // Ландшафт 1280x800
+  │     └── backlight 100%
+  ├── touch_init(disp)
+  │     ├── board_i2c_get_bus()     // Повторное использование общей шины
+  │     ├── GT911 I2C panel IO      // Адрес 0x5D, 400 кГц
+  │     ├── GT911 touch create      // Polling mode (int_gpio=NC)
+  │     └── lvgl_port_add_touch()   // Регистрация в LVGL (LV_INDEV_MODE_TIMER)
+  ├── plant_data_init()
+  ├── alarm_ring_init()
+  ├── lang_init(LANG_RU)
+  ├── ui_init(disp)
+  ├── eth_init()                    // Ethernet: IP101 PHY, RST=GPIO51
+  ├── eth_wait_for_ip(10s)
+  └── mqtt_client_start()
+```
 
-## Troubleshooting
+## Ключевые технические решения
 
-* If the LED isn't blinking, check the GPIO or the LED type selection in the `Example Configuration` menu.
+### Дисплей
 
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+- Нативное разрешение: 800x1280 (портрет), MIPI DSI 2-lane, 1500 Мбит/с на линию
+- Программный поворот: `LV_DISPLAY_ROTATION_270` → ландшафт 1280x800
+- `avoid_tearing = false`: sw_rotate несовместим с avoid_tearing в esp_lvgl_port. При `avoid_tearing=true` LVGL рисует напрямую в DSI frame buffer, но буфер программного поворота отключается от DSI pipeline → белый экран
+- Буферы: double_buffer в SPIRAM + DMA, 800x80 = 64000 пикселей на буфер
+- `num_fbs = 2`: необходимо для двойной буферизации
+
+### Тачскрин
+
+- GT911 в режиме polling (`int_gpio_num = GPIO_NUM_NC`): в режиме прерываний GT911 удерживает INT LOW после инициализации, вызывая шторм NEGEDGE-прерываний, который блокирует FreeRTOS tick и приводит к WDT crash
+- Без `swap_xy`: GT911 на данной плате уже сконфигурирован в ландшафтной ориентации (raw X = 0..1280, raw Y = 0..800)
+- Без `driver_data`: процедура инициализации адреса (переключение INT+RST GPIO) пропущена для избежания конфликта с режимом прерываний
+
+### I2C
+
+- Компонент `waveshare/esp_lcd_jd9365_10_1` использует legacy `i2c_bus` API, тогда как board_i2c и touch используют новый `i2c_master` API — `CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK=y`
+- `board_i2c_init()` вызывается до `display_init()`, чтобы компонент waveshare обнаружил существующую шину через `i2c_master_get_bus_handle()`
+
+## MQTT-топики
+
+| Направление | Топик | Описание |
+|-------------|-------|----------|
+| HMI <- PLC | `ro_plant/status/#` | Состояние, I/O, датчики, телеметрия |
+| HMI <- PLC | `ro_plant/alarms` | Аварийные сообщения (JSON) |
+| HMI -> PLC | `ro_plant/command/{mode,pump,doser,heater}` | Команды управления |
+| HMI -> PLC | `ro_plant/settings/{pressure,doser,washing,timeouts}` | Уставки |
+| HMI (LWT) | `ro_hmi/availability` | online / offline (retained) |
+
+Подробное описание MQTT: см. `docs/mqtt_config.md` и `docs/hmi_data_config.md`.
+
+## Зависимости
+
+- **ESP-IDF** >= 5.3.0
+- **LVGL** ~9.2 (через esp_lvgl_port ^2)
+- **esp_lcd_touch** ^1.1
+- **esp_lcd_touch_gt911** ^1 (из ESP Component Registry)
+- **waveshare/esp_lcd_jd9365_10_1** (из ESP Component Registry)
+
+## Сборка и прошивка
+
+```bash
+idf.py set-target esp32p4
+idf.py build
+idf.py -p PORT flash monitor
+```
+
+Для выхода из монитора: `Ctrl-]`
+
+## Таблица разделов
+
+| Раздел | Тип | Смещение | Размер |
+|--------|-----|----------|--------|
+| nvs | data/nvs | 0x9000 | 24 KB |
+| phy_init | data/phy | 0xF000 | 4 KB |
+| factory | app | 0x10000 | 3 MB |
+| coredump | data/coredump | 0x310000 | 64 KB |
+
+## Ключевые настройки (sdkconfig)
+
+- PSRAM 200 MHz + XIP, L2 cache 256 KB / 128B line
+- FreeRTOS 1000 Hz, main task stack 10 KB
+- LVGL color depth 16-bit (RGB565), Montserrat 14
+- MQTT buffer 2048 bytes
+- Task WDT timeout 30s
+- Ethernet PHY RST = GPIO51 (Waveshare ESP32-P4-NANO)
+- I2C legacy conflict check disabled

@@ -135,8 +135,8 @@ lv_obj_t *scr_diagnostics_create(lv_obj_t *parent)
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     diag_widgets_t *w = lv_malloc(sizeof(diag_widgets_t));
-    lv_memzero(w, sizeof(diag_widgets_t));
     if (!w) return cont;
+    lv_memzero(w, sizeof(diag_widgets_t));
     lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- System panel (top-left) ---- */

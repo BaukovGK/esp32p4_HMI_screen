@@ -63,6 +63,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DATA:
+        // Пропуск фрагментированных сообщений (payload > buffer.size)
+        if (event->current_data_offset > 0 || event->data_len < event->total_data_len) {
+            ESP_LOGW(TAG, "Fragmented MQTT message (%d/%d), skipping",
+                     event->data_len, event->total_data_len);
+            break;
+        }
         // Передача входящего сообщения парсеру для обработки
         mqtt_handle_incoming(event->topic, event->topic_len,
                              event->data, event->data_len);

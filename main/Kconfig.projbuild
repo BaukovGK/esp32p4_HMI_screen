@@ -27,7 +27,7 @@ menu "RO HMI Configuration"
 
         config ETH_PHY_RST_GPIO
             int "PHY Reset GPIO (-1 if not used)"
-            default -1
+            default 51
     endmenu
 
 endmenu

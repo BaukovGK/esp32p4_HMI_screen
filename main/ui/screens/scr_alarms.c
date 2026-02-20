@@ -25,9 +25,9 @@
 #include <math.h>
 #include <time.h>
 
-/* Максимальное количество записей для отображения */
-#define MAX_ACTIVE  ALARM_RING_SIZE   // 16
-#define MAX_HISTORY ALARM_RING_SIZE   // 16
+/* Максимальное количество записей для отображения (ограничено для экономии стека) */
+#define MAX_ACTIVE  16
+#define MAX_HISTORY 16
 
 /* ---- Хранилище виджетов ---- */
 
@@ -190,8 +190,8 @@ lv_obj_t *scr_alarms_create(lv_obj_t *parent)
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     alarms_widgets_t *w = lv_malloc(sizeof(alarms_widgets_t));
-    lv_memzero(w, sizeof(alarms_widgets_t));
     if (!w) return cont;
+    lv_memzero(w, sizeof(alarms_widgets_t));
     lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- Active alarms section (top half) ---- */

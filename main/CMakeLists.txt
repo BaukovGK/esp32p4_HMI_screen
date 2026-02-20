@@ -1,5 +1,6 @@
 set(MAIN_SRCS
     "app_main.c"
+    "board/board_i2c.c"
     "board/display_init.c"
     "board/touch_init.c"
     "data/plant_data.c"
@@ -49,8 +50,8 @@ idf_component_register(
     INCLUDE_DIRS ${MAIN_INCLUDES}
     REQUIRES
         esp_lcd
-        esp_lcd_jd9365
-        esp_lcd_touch_gsl3680
+        esp_lcd_jd9365_10_1
+        esp_lcd_touch_gt911
         esp_lvgl_port
         driver
         esp_eth

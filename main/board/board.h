@@ -3,10 +3,11 @@
  * @brief Аппаратные определения платы HMI-дисплея установки обратного осмоса.
  *
  * Содержит все аппаратные константы: назначение GPIO-пинов, параметры
- * MIPI DSI дисплея (JD9365), сенсорного контроллера (GSL3680, I2C),
+ * MIPI DSI дисплея (JD9365), сенсорного контроллера (GT911, I2C),
  * питание PHY через LDO и настройки буфера отрисовки LVGL.
  *
- * Платформа: ESP32-P4, дисплей 10.1" 800x1280 (портрет), поворот в 1280x800 (ландшафт).
+ * Платформа: Waveshare ESP32-P4-NANO, дисплей 10.1" 800x1280 (портрет),
+ * поворот в 1280x800 (ландшафт).
  */
 #pragma once
 
@@ -24,7 +25,7 @@ typedef int gpio_num_t;
 #define GPIO_NUM_22  22
 #define GPIO_NUM_23  23
 #define GPIO_NUM_27  27
-#define I2C_NUM_0    0
+#define I2C_NUM_1    1
 #define LEDC_TIMER_10_BIT  10
 #endif
 
@@ -36,14 +37,20 @@ typedef int gpio_num_t;
 #define BOARD_LCD_BPP               16      // Глубина цвета: RGB565 (16 бит на пиксель)
 #define BOARD_LCD_BIGENDIAN         0       // Порядок байт: little-endian
 #define BOARD_LCD_BACKLIGHT_GPIO    GPIO_NUM_23 // GPIO управления подсветкой (ШИМ через LEDC)
-#define BOARD_LCD_RST_GPIO          GPIO_NUM_27 // GPIO аппаратного сброса LCD-панели
+#define BOARD_LCD_RST_GPIO          GPIO_NUM_27 // Аппаратный сброс LCD (GPIO27)
+
+/* ---- MCU дисплея Waveshare (I2C 0x45) ---- */
+/* MCU дисплея присутствует на шине I2C (адрес 0x45).
+ * Предварительная инициализация (reg 0x95, 0x96) выполняется внутри
+ * компонента waveshare/esp_lcd_jd9365_10_1 автоматически.
+ * Аппаратный сброс LCD через GPIO 27. */
 
 /* ---- Питание PHY MIPI DSI через встроенный LDO ---- */
 #define BOARD_MIPI_DSI_PHY_LDO_CHAN 3       // Канал внутреннего LDO-регулятора ESP32-P4
 #define BOARD_MIPI_DSI_PHY_LDO_MV  2500    // Напряжение питания PHY: 2.5 В
 
-/* ---- Сенсорная панель (контроллер GSL3680, интерфейс I2C) ---- */
-#define BOARD_TOUCH_I2C_PORT        I2C_NUM_0   // Порт I2C (I2C0)
+/* ---- Сенсорная панель (контроллер GT911, интерфейс I2C) ---- */
+#define BOARD_TOUCH_I2C_PORT        I2C_NUM_1   // Порт I2C (I2C1 — как в Waveshare BSP)
 #define BOARD_TOUCH_I2C_SDA         GPIO_NUM_7  // GPIO линии данных I2C SDA
 #define BOARD_TOUCH_I2C_SCL         GPIO_NUM_8  // GPIO линии тактирования I2C SCL
 #define BOARD_TOUCH_I2C_FREQ_HZ     400000      // Частота I2C: 400 кГц (Fast Mode)

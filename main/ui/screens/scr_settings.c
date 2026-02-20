@@ -181,6 +181,7 @@ static void evt_apply_pressure(lv_event_t *e)
         return;
     }
     mqtt_publish_settings_pressure(&s);
+    plant_data_save_settings_pressure(&s);
 }
 
 /** Обработчик "Применить" вкладки "Дозатор" -- валидация и отправка уставок по MQTT. */
@@ -199,6 +200,7 @@ static void evt_apply_doser(lv_event_t *e)
         return;
     }
     mqtt_publish_settings_doser(&s);
+    plant_data_save_settings_doser(&s);
 }
 
 /** Обработчик "Применить" вкладки "Промывка" -- валидация и отправка уставок по MQTT. */
@@ -222,6 +224,7 @@ static void evt_apply_washing(lv_event_t *e)
         return;
     }
     mqtt_publish_settings_washing(&s);
+    plant_data_save_settings_washing(&s);
 }
 
 /** Обработчик "Применить" вкладки "Таймауты" -- валидация и отправка уставок по MQTT. */
@@ -240,6 +243,7 @@ static void evt_apply_timeouts(lv_event_t *e)
         return;
     }
     mqtt_publish_settings_timeouts(&s);
+    plant_data_save_settings_timeouts(&s);
 }
 
 /** Создаёт кнопку "Применить" внизу вкладки настроек. */
@@ -433,8 +437,8 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     settings_widgets_t *w = lv_malloc(sizeof(settings_widgets_t));
-    lv_memzero(w, sizeof(settings_widgets_t));
     if (!w) return cont;
+    lv_memzero(w, sizeof(settings_widgets_t));
     lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
     s_widgets = w;
 

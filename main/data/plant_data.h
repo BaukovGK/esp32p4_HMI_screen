@@ -262,8 +262,22 @@ typedef struct {
 
 /* ---- API (потокобезопасный доступ через внутренний мьютекс) ---- */
 
-/** Инициализация хранилища: обнуление, значения по умолчанию, создание мьютекса */
+/** Инициализация хранилища: обнуление, загрузка уставок из NVS, создание мьютекса */
 void plant_data_init(void);
+
+/* ---- Локальное кэширование уставок в NVS ---- */
+
+/** Сохранить уставки давления в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_pressure(const settings_pressure_t *s);
+
+/** Сохранить уставки дозатора в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_doser(const settings_doser_t *s);
+
+/** Сохранить уставки промывки в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_washing(const settings_washing_t *s);
+
+/** Сохранить уставки таймаутов в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_timeouts(const settings_timeouts_t *s);
 
 /**
  * Захват мьютекса для пакетного чтения (UI-задача).
