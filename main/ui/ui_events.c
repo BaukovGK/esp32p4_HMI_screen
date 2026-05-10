@@ -191,12 +191,14 @@ void ui_evt_start_auto(lv_event_t *e)
     show_confirm_dialog(STR_CONFIRM_START_AUTO, "start_auto");
 }
 
-/** Остановка установки -- MQTT-команда "stop" */
+/** Остановка установки — защитное действие, БЕЗ подтверждения.
+ * Один тап = команда сразу уходит на контроллер.
+ * Cooldown 1 сек оставлен для защиты от случайных double-tap'ов. */
 void ui_evt_stop(lv_event_t *e)
 {
-    if (!check_cooldown()) return;
     (void)e;
-    show_confirm_dialog(STR_CONFIRM_STOP, "stop");
+    if (!check_cooldown()) return;
+    mqtt_publish_mode_cmd("stop");
 }
 
 /** Переход в ручной режим -- MQTT-команда "set_manual" */
