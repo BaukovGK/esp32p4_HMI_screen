@@ -69,7 +69,13 @@ esp_err_t board_i2c_init(void)
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
         .flags = {
-            .enable_internal_pullup = true,
+            /* Внутренние pullup'ы отключены: на 400 кГц с 3 устройствами и
+             * ёмкостью шины внутренние ~45 кОм НЕ обеспечивают спец-совместимый
+             * tR (≤300 нс). Полагаемся на внешние pullup'ы 4.7-10 кОм на плате
+             * Waveshare ESP32-P4-NANO. Если на новой ревизии платы внешних
+             * pullup'ов нет — может потребоваться вернуть internal_pullup=true
+             * с пониженной частотой (100 кГц), либо добавить внешние резисторы. */
+            .enable_internal_pullup = false,
         },
     };
     i2c_master_bus_handle_t tmp_bus = NULL;

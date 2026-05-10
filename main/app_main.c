@@ -23,6 +23,8 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
+#include "esp_heap_caps.h"
 
 // Общая шина I2C для периферии платы (MCU дисплея, тач-контроллер)
 #include "board_i2c.h"
@@ -149,6 +151,31 @@ void app_main(void)
         ESP_LOGE(TAG, "MQTT client start failed: %s", esp_err_to_name(ret));
     }
 
-    ESP_LOGI(TAG, "Initialization complete, entering main loop");
+    /* 12. Регистрация ключевых задач в Task WDT.
+     *     LVGL создаёт свою задачу внутри esp_lvgl_port_init() с именем "taskLVGL".
+     *     MQTT-клиент создаёт задачу внутри esp_mqtt_client_start().
+     *     Без регистрации бесконечный цикл в обработчике UI не вызовет рестарт. */
+    {
+        TaskHandle_t lvgl_task = xTaskGetHandle("taskLVGL");
+        if (lvgl_task) {
+            esp_err_t err = esp_task_wdt_add(lvgl_task);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "LVGL task added to WDT");
+            } else {
+                ESP_LOGW(TAG, "esp_task_wdt_add(taskLVGL) failed: %s", esp_err_to_name(err));
+            }
+        } else {
+            ESP_LOGW(TAG, "LVGL task handle not found by name 'taskLVGL'");
+        }
+        /* TODO: Регистрация MQTT-задачи требует уточнения имени задачи внутри
+         *       esp_mqtt_client_start() — может различаться по версиям ESP-IDF MQTT component.
+         *       После уточнения добавить вызов esp_task_wdt_add() для MQTT handle. */
+    }
+
+    /* 13. Логирование baseline памяти после инициализации */
+    ESP_LOGI(TAG, "Initialization complete: free heap = %lu, min heap = %lu, free PSRAM = %lu",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)esp_get_minimum_free_heap_size(),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 #endif /* !LVGL_LIVE_PREVIEW */

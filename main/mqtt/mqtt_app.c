@@ -24,6 +24,45 @@ static const char *TAG = "mqtt_app";
 /** Дескриптор MQTT-клиента ESP-IDF (NULL если не инициализирован) */
 static esp_mqtt_client_handle_t s_client = NULL;
 
+/* ---- Состояние подписок (H1: диагностика ACL-deny на брокере) ---- */
+/** Количество subscribe()-вызовов в CONNECTED, ещё не подтверждённых SUBSCRIBED. */
+static int s_pending_subs = 0;
+/** Сколько подписок выпущено в последнем CONNECTED (для лога). */
+static int s_issued_subs  = 0;
+
+/* ---- Backoff-аккаунтинг для reconnect (H8) ----
+ * ESP-IDF MQTT в IDF 5.4 сам реконнектит с фиксированным
+ * .network.reconnect_timeout_ms (см. mqtt_client.h:332). Встроенного
+ * экспоненциального backoff в API нет, поэтому здесь ведём только
+ * счётчик попыток для логирования; собственно интервал — на стороне IDF.
+ */
+static int s_reconnect_attempts = 0;
+
+/* ---- Сборка фрагментированных MQTT-сообщений (H2) ----
+ * При payload > buffer.size ESP-IDF MQTT доставляет данные несколькими
+ * MQTT_EVENT_DATA подряд: первый с current_data_offset==0, последующие
+ * с накапливающимся offset. Топик передаётся только в первом фрагменте.
+ * Раньше всё это молча отбрасывалось; теперь склеиваем в s_frag_buf
+ * и в момент поступления последнего фрагмента отдаём целиком парсеру.
+ */
+#define MQTT_FRAG_BUF_SIZE   8192
+#define MQTT_FRAG_TOPIC_SIZE 128
+static char     s_frag_buf[MQTT_FRAG_BUF_SIZE];
+static char     s_frag_topic[MQTT_FRAG_TOPIC_SIZE];
+static int      s_frag_topic_len = 0;
+static int      s_frag_offset    = 0;        /* сколько байт payload уже скопировано */
+static int      s_frag_total     = 0;        /* ожидаемый total_data_len первого фрагмента */
+static bool     s_frag_active    = false;    /* идёт сборка многочастного сообщения */
+static uint32_t s_dropped_fragments = 0;     /* статистика: сколько пакетов отброшено из-за переполнения */
+
+static void mqtt_frag_reset(void)
+{
+    s_frag_active    = false;
+    s_frag_offset    = 0;
+    s_frag_total     = 0;
+    s_frag_topic_len = 0;
+}
+
 /**
  * Обработчик событий MQTT-клиента.
  *
@@ -40,46 +79,129 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
     esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
 
     switch ((esp_mqtt_event_id_t)event_id) {
-    case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "Connected to MQTT broker");
+    case MQTT_EVENT_CONNECTED: {
+        ESP_LOGI(TAG, "Connected to MQTT broker (after %d reconnect attempt%s)",
+                 s_reconnect_attempts, s_reconnect_attempts == 1 ? "" : "s");
+        s_reconnect_attempts = 0;          /* H8: сбросить счётчик при успешном connect */
+        mqtt_frag_reset();                 /* H2: на новом коннекте не доедаем старые фрагменты */
+        s_pending_subs = 0;                /* H1: новый коннект — заново отслеживаем подписки */
+        s_issued_subs  = 0;
         // Обновляем статус подключения в общей структуре данных
         plant_data_set_mqtt_status(true);
+
         int msg_id;
         // Подписка на все топики статуса установки (QoS 0)
         msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_STATUS_ALL, 0);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_STATUS_ALL);
+        else { s_pending_subs++; s_issued_subs++; }
         // Подписка на аварийные сообщения (QoS 1 для гарантии доставки)
         msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_ALARMS, 1);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_ALARMS);
+        else { s_pending_subs++; s_issued_subs++; }
         // Подписка на availability контроллера (retained, QoS 1)
         msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_AVAILABILITY, 1);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_AVAILABILITY);
+        else { s_pending_subs++; s_issued_subs++; }
         /* Публикация доступности HMI (retained) */
         msg_id = esp_mqtt_client_publish(s_client, MQTT_TOPIC_HMI_AVAILABILITY, "online", 0, 1, 1);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to publish availability");
+        ESP_LOGI(TAG, "issued %d subscribe requests, awaiting SUBACK", s_issued_subs);
         break;
+    }
 
     case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGW(TAG, "Disconnected from MQTT broker");
+        s_reconnect_attempts++;            /* H8: считаем «попыток было N» — сам реконнект делает IDF */
+        ESP_LOGW(TAG, "Disconnected from MQTT broker (reconnect attempt %d, IDF retries every reconnect_timeout_ms)",
+                 s_reconnect_attempts);
+        mqtt_frag_reset();                 /* H2: незавершённая сборка более не валидна */
         // Сброс статуса подключения
         plant_data_set_mqtt_status(false);
         break;
 
-    case MQTT_EVENT_DATA:
-        // Пропуск фрагментированных сообщений (payload > buffer.size)
-        if (event->current_data_offset > 0 || event->data_len < event->total_data_len) {
-            ESP_LOGW(TAG, "Fragmented MQTT message (%d/%d), skipping",
-                     event->data_len, event->total_data_len);
+    case MQTT_EVENT_SUBSCRIBED:
+        if (s_pending_subs > 0) s_pending_subs--;
+        ESP_LOGI(TAG, "subscribed: msg_id=%d (pending=%d/%d)",
+                 event->msg_id, s_pending_subs, s_issued_subs);
+        if (s_pending_subs == 0 && s_issued_subs > 0) {
+            ESP_LOGI(TAG, "all %d subscriptions confirmed by broker", s_issued_subs);
+        }
+        break;
+
+    case MQTT_EVENT_UNSUBSCRIBED:
+        ESP_LOGW(TAG, "unsubscribed: msg_id=%d", event->msg_id);
+        break;
+
+    case MQTT_EVENT_DATA: {
+        /* H2: сборка фрагментов. ESP-IDF MQTT доставляет topic только в первом
+         * фрагменте; в последующих event->topic_len == 0. Разруливаем оба случая. */
+        const bool is_first = (event->current_data_offset == 0);
+        const bool fits_in_one = is_first && (event->data_len == event->total_data_len);
+
+        if (fits_in_one) {
+            /* Быстрый путь: сообщение поместилось в один пакет — без буферизации. */
+            mqtt_handle_incoming(event->topic, event->topic_len,
+                                 event->data, event->data_len);
             break;
         }
-        // Передача входящего сообщения парсеру для обработки
-        mqtt_handle_incoming(event->topic, event->topic_len,
-                             event->data, event->data_len);
+
+        if (is_first) {
+            /* Начало нового многочастного сообщения. */
+            if (event->total_data_len > MQTT_FRAG_BUF_SIZE) {
+                ESP_LOGW(TAG, "Fragmented payload too big (%d > %d), dropping",
+                         event->total_data_len, MQTT_FRAG_BUF_SIZE);
+                s_dropped_fragments++;
+                mqtt_frag_reset();
+                break;
+            }
+            if ((size_t)event->topic_len + 1 > sizeof(s_frag_topic)) {
+                ESP_LOGW(TAG, "Fragmented topic too long (%d), dropping", event->topic_len);
+                s_dropped_fragments++;
+                mqtt_frag_reset();
+                break;
+            }
+            memcpy(s_frag_topic, event->topic, (size_t)event->topic_len);
+            s_frag_topic[event->topic_len] = '\0';
+            s_frag_topic_len = event->topic_len;
+            memcpy(s_frag_buf, event->data, (size_t)event->data_len);
+            s_frag_offset = event->data_len;
+            s_frag_total  = event->total_data_len;
+            s_frag_active = true;
+        } else {
+            /* Продолжение. Должно быть после валидного начала. */
+            if (!s_frag_active) {
+                ESP_LOGW(TAG, "fragment continuation without start (offset=%d), dropping",
+                         event->current_data_offset);
+                s_dropped_fragments++;
+                break;
+            }
+            if (event->current_data_offset != s_frag_offset ||
+                s_frag_offset + event->data_len > MQTT_FRAG_BUF_SIZE ||
+                s_frag_offset + event->data_len > s_frag_total) {
+                ESP_LOGW(TAG, "fragment overflow/misorder (have=%d got_off=%d add=%d total=%d), dropping",
+                         s_frag_offset, event->current_data_offset,
+                         event->data_len, s_frag_total);
+                s_dropped_fragments++;
+                mqtt_frag_reset();
+                break;
+            }
+            memcpy(s_frag_buf + s_frag_offset, event->data, (size_t)event->data_len);
+            s_frag_offset += event->data_len;
+        }
+
+        /* Полное сообщение собрано — отдать наверх и сбросить состояние. */
+        if (s_frag_active && s_frag_offset == s_frag_total) {
+            mqtt_handle_incoming(s_frag_topic, s_frag_topic_len,
+                                 s_frag_buf, s_frag_offset);
+            mqtt_frag_reset();
+        }
         break;
+    }
 
     case MQTT_EVENT_ERROR:
         if (event->error_handle) {
             ESP_LOGE(TAG, "MQTT error type: %d", event->error_handle->error_type);
+        } else {
+            ESP_LOGE(TAG, "MQTT error (no handle)");
         }
         break;
 

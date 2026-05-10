@@ -204,6 +204,15 @@ lv_display_t *display_init(void)
 #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
 #endif
+        /* buff_spiram=true + buff_dma=true для ESP32-P4 + MIPI DSI:
+         *
+         * На ESP32-P4 PSRAM доступна DMA, и esp_lvgl_port корректно обрабатывает
+         * cache coherency через Cache_WriteBack_Addr перед каждым DMA-flush'ем.
+         * Это работает на тестируемой плате Waveshare ESP32-P4-NANO; если на
+         * другой плате/ревизии будут глитчи на экране (tearing/неполные кадры),
+         * проверь логи ESP-IDF на 'cache invalidate' warnings и переключи
+         * draw-буферы в internal SRAM (buff_spiram=false), что удвоит использование
+         * internal SRAM на double-buffer 800×80×2 = 256 KB — в пределах допустимого. */
         .flags = {
             .buff_dma = true,
             .buff_spiram = true,

@@ -66,6 +66,19 @@ typedef int gpio_num_t;
 #define BOARD_LCD_LEDC_FREQ_HZ   20000
 #define BOARD_LCD_LEDC_DUTY_BITS LEDC_TIMER_10_BIT
 
-/* ---- Буфер отрисовки LVGL ---- */
+/* ---- Буфер отрисовки LVGL ----
+ *
+ * При sw_rotate (поворот 270° → ландшафт 1280x800) буфер интерпретируется в
+ * native-portrait геометрии (800 px × N строк), а LVGL выполняет несколько
+ * partial redraws на full-screen операцию. Размер выбран как baseline:
+ * 800×80 ≈ 64K px ≈ 128 KB на буфер; double-buffer ≈ 256 KB в PSRAM.
+ * При жалобах на медленную перерисовку (или tearing/scrolling в ландшафте)
+ * — увеличить BOARD_LCD_DRAW_BUFF_LINES до 120 или 160 (ограничение — память PSRAM).
+ * Менять без профилирования на железе не следует. */
 #define BOARD_LCD_DRAW_BUFF_LINES   80      // Количество строк в буфере отрисовки
 #define BOARD_LCD_DRAW_BUFF_SIZE    (BOARD_LCD_H_RES * BOARD_LCD_DRAW_BUFF_LINES) // Размер буфера в пикселях (800 * 80 = 64000)
+
+/* Sanity-check: буфер должен покрывать как минимум одну полную строку дисплея,
+ * иначе LVGL flush станет крайне неэффективным. */
+_Static_assert(BOARD_LCD_DRAW_BUFF_SIZE >= BOARD_LCD_H_RES,
+               "draw buffer должен быть >= ширины дисплея для эффективной отрисовки");
