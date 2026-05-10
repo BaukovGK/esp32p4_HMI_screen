@@ -174,6 +174,41 @@
 | **slide modal** | confirm dialog | 200 мс |
 | **tab switch** | переключение вкладок | 150 мс crossfade |
 | **screen change** | переход между экранами | НЕ используем (мгновенно) |
+| **flow-march** | имитация движения воды по активным трубам (sw-pipe-flow overlay) | 1400 мс цикл |
+| **recycle-march** | то же на dashed-линиях рециклов | 1600 мс цикл |
+
+### 6.1 Flow animation (движение воды по трубам)
+
+В прототипе (`proto/index.html`) реализовано через два слоя:
+1. **Базовая линия** `pipe-active` — сплошная толстая (5 px) accent-цвета
+2. **Overlay** `pipe-flow` — поверх, dashed (`stroke-dasharray: 6 10`),
+   полупрозрачный белый (`rgba(255,255,255,0.7)`), анимация
+   `stroke-dashoffset` с -16 за 1400 мс линейно
+
+Создаёт иллюзию «бегущих капель» воды. На рециклах (`pipe-recycle.flowing`)
+анимируется напрямую stroke-dashoffset существующей dashed-линии.
+
+В LVGL 9.2 нет встроенного `stroke-dashoffset`, но эффект реализуется
+через **спрайтовую анимацию** на `lv_obj_t` с маской:
+```c
+// Создать lv_obj покрывающий активный сегмент трубы.
+// Применить mask с чередующимися прозрачными и непрозрачными
+// полосами, сдвигать mask раз в N мс через lv_anim_set_exec_cb.
+// На P4 даже с PSRAM это будет fillrate-bound — рекомендую 4-8 fps.
+```
+
+Альтернативно — отрисовка через `lv_canvas` с обновлением буфера каждый
+тик. Это дороже но проще программно.
+
+⚠️ Для оптимизации ESP32-P4 с PSRAM — анимация **только на видимых**
+сегментах труб, и **только когда state = AUTO/RUNNING или WASHING**
+(в IDLE и FAULT — статичные линии без анимации).
+
+### 6.2 Reduced motion (a11y)
+
+Все анимации (`pulse`, `flow-march`, etc) должны **отключаться** при
+`prefers-reduced-motion: reduce`. В LVGL — глобальный флаг
+`s_reduce_motion` в settings + проверка в `lv_anim_*` calls.
 
 ⚠️ Все анимации **disabled** по global flag в settings → "Reduced motion" (для оптимизации производительности при слабой PSRAM/CPU).
 
