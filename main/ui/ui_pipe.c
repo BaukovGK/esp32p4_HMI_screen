@@ -38,35 +38,44 @@ static void pipe_data_free_cb(lv_event_t *e)
     if (d) lv_free(d);
 }
 
-/* ─── анимация translate ──────────────────────────────────────────── */
-
-static void anim_translate_x_cb(void *obj, int32_t v)
+/* ─── анимация позиции для marching dashes ────────────────────────
+ *
+ * Используем lv_obj_set_x/set_y (физическое перемещение объекта),
+ * а НЕ lv_obj_set_style_translate_x/y. Причина: на lv_line виджете
+ * style_translate в LVGL 9 не всегда корректно перерисовывает
+ * dashed-pattern — координаты dash'ей рассчитываются от bbox'а
+ * объекта, а translate сдвигает только финальные пиксели, не пересчёт
+ * draw_task. В результате линия "плывёт", но штрихи относительно
+ * базовой green pipe не маршируют.
+ *
+ * lv_obj_set_x физически меняет obj->pos.x → obj->coords пересчитывается
+ * → bbox dash'ей сдвигается → видим марш в абсолютных координатах. */
+static void anim_move_x_cb(void *obj, int32_t v)
 {
-    lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0);
+    lv_obj_set_x((lv_obj_t *)obj, v);
 }
-static void anim_translate_y_cb(void *obj, int32_t v)
+static void anim_move_y_cb(void *obj, int32_t v)
 {
-    lv_obj_set_style_translate_y((lv_obj_t *)obj, v, 0);
+    lv_obj_set_y((lv_obj_t *)obj, v);
 }
 
 static void start_flow_anim(lv_obj_t *obj, int x_step, int y_step,
                             uint32_t duration_ms)
 {
-    /* Анимируем ту координату, по которой идёт поток. */
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, obj);
     if (x_step != 0) {
-        lv_anim_set_exec_cb(&a, anim_translate_x_cb);
+        lv_anim_set_exec_cb(&a, anim_move_x_cb);
         lv_anim_set_values(&a, 0, FLOW_PERIOD_PX * x_step);
     } else {
-        lv_anim_set_exec_cb(&a, anim_translate_y_cb);
+        lv_anim_set_exec_cb(&a, anim_move_y_cb);
         lv_anim_set_values(&a, 0, FLOW_PERIOD_PX * y_step);
     }
     lv_anim_set_duration(&a, duration_ms);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    /* path по умолчанию linear — нам нужна именно линейная скорость
-     * для seamless wrap-around (default = lv_anim_path_linear). */
+    /* lv_anim_init() устанавливает path_cb = lv_anim_path_linear по
+     * default — линейная скорость нужна для seamless wrap-around. */
     lv_anim_start(&a);
 }
 
