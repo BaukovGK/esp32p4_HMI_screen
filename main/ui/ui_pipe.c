@@ -186,16 +186,27 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
     int box_x = horizontal ? x_min : (x_min - half);
     int box_y = horizontal ? (y_min - half) : y_min;
 
-    /* Внешний контейнер — клипует overlay по bbox. */
+    /* Внешний контейнер — клипует overlay по bbox.
+     * ВАЖНО: solid pipe-цвет (для ACTIVE) живёт ИМЕННО на box'е, чтобы не
+     * двигался вместе с overlay'ем. Иначе при сдвиге overlay'а слева от
+     * pipe'а появлялся бы пустой "зазор". */
     lv_obj_t *box = lv_obj_create(parent);
     lv_obj_set_pos(box, box_x, box_y);
     lv_obj_set_size(box, box_w, box_h);
-    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(box, 0, 0);
     lv_obj_set_style_radius(box, 0, 0);
     lv_obj_set_style_pad_all(box, 0, 0);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
+
+    if (kind == UI_PIPE_ACTIVE) {
+        /* Solid pipe-цвет статичен — нанесён на box. */
+        lv_obj_set_style_bg_color(box, pipe_color(kind), 0);
+        lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
+    } else {
+        /* RECYCLE — только дашики, подложка прозрачная. */
+        lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    }
 
     /* Overlay rect — расширен на FLOW_PERIOD_PX с каждой стороны вдоль
      * потока. Tiled dash background. Анимируется его позиция. */
@@ -218,26 +229,25 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
     lv_obj_set_style_radius(overlay, 0, 0);
     lv_obj_set_style_border_width(overlay, 0, 0);
     lv_obj_set_style_pad_all(overlay, 0, 0);
+    /* Overlay только переносит tiled-картинку — собственного bg НЕТ,
+     * иначе при движении overlay'а его подложка двигалась бы вместе с
+     * ним и создавала видимый "зазор" у начала pipe'а. */
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
     lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
 
-    /* bg_image = tiled dash pattern. */
+    /* bg_image = tiled dash pattern. Recolor подкрашивает белый паттерн
+     * в нужный цвет (для ACTIVE — белые дашики поверх зелёной box-подложки,
+     * для RECYCLE — info-cyan дашики на прозрачном фоне). */
     const lv_image_dsc_t *tile = horizontal ? &dash_h_img : &dash_v_img;
     lv_obj_set_style_bg_image_src(overlay, tile, 0);
     lv_obj_set_style_bg_image_tiled(overlay, true, 0);
 
     if (kind == UI_PIPE_ACTIVE) {
-        /* Solid green pipe + dashed white overlay (semi-transparent
-         * via image opacity). */
-        lv_obj_set_style_bg_color(overlay, pipe_color(kind), 0);
-        lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
-        /* Уменьшим интенсивность dashes — 75% opa чтобы не глушить
-         * green underneath. */
+        /* Белые дашики поверх зелёного box — 75% opa, чтобы зелёный
+         * "просвечивал" сквозь дашики и не было резкого контраста. */
         lv_obj_set_style_bg_image_opa(overlay, (LV_OPA_COVER * 75) / 100, 0);
     } else {
-        /* RECYCLE — только dashes без solid base. Recolor белого
-         * паттерна в info-цвет (cyan). */
-        lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
         lv_obj_set_style_bg_image_recolor(overlay, pipe_color(kind), 0);
         lv_obj_set_style_bg_image_recolor_opa(overlay, LV_OPA_COVER, 0);
     }
