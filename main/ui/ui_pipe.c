@@ -2,30 +2,34 @@
  * @file ui_pipe.c
  * @brief Реализация помощников для трубопроводов мнемосхемы.
  *
- * Анимация потока: для UI_PIPE_ACTIVE и UI_PIPE_RECYCLE сегмент
- * оборачивается в clipping-контейнер размером bbox+padding. Внутри
- * контейнера живут line + (для active) animated overlay. Когда
- * overlay/recycle-line translate'ится за пределы контейнера —
- * LVGL автоматически обрезает (default behavior без OVERFLOW_VISIBLE).
+ * Анимация потока (marching dashes) — ключевая идея:
  *
- * Так визуально решается проблема "overlay вылезает за концы трубы":
- *   • контейнер имеет точные bbox трубы
- *   • анимация translate сдвигает dashes на полный period (16 px)
- *   • за бортом контейнера ничего не видно
+ *   1. Каждый animated сегмент оборачивается в clipping-контейнер
+ *      размером с bbox трубы (+ запас на line caps).
+ *   2. ВНУТРИ контейнера animated-линия (overlay для ACTIVE, сам
+ *      pipe-recycle для RECYCLE) ВЫХОДИТ за пределы контейнера на
+ *      ОДИН ПЕРИОД UЗОРА (16 px) с каждой стороны вдоль направления
+ *      потока. Невидимая (clipped) часть служит "запасом" из которого
+ *      выходят новые штрихи при translate.
+ *   3. Animation translate_x/y от 0 до ±16 за period_ms. Поскольку
+ *      dash-period = translate-range, frame 0 и frame 16 визуально
+ *      идентичны → seamless loop.
  *
- * Для INACTIVE (статичная труба) контейнер не создаётся — line
- * добавляется напрямую в parent (экономия одного объекта на каждый
- * inactive segment, которых обычно немного — drain + dispenser).
+ * Без extension (п.2) у animated-линии заканчивается заливка штрихов
+ * на конце визимой области, и при translate'е возникает «hole» —
+ * именно это давало эффект «линия двигается, штрихи стоят».
  */
 #include "ui_pipe.h"
 #include "ui_tokens.h"
 
-#include <stdlib.h>   /* для abs() */
+/* Сколько пикселей "запаса" добавляем к animated-линии с каждой
+ * стороны вдоль потока. = period узора (8+8 = 10+6 = 16). */
+#define FLOW_PERIOD_PX  16
 
-/* ─── контекст анимированного пайпа ────────────────────────────────── */
+/* ─── контекст пайпа в user_data ──────────────────────────────────── */
 typedef struct {
-    lv_point_precise_t pts[2];          /* основной line points (rel coords) */
-    lv_point_precise_t overlay_pts[2];  /* overlay points (только для ACTIVE) */
+    lv_point_precise_t pts[2];          /* основной line (для INACTIVE и base UI_PIPE_ACTIVE) */
+    lv_point_precise_t overlay_pts[2];  /* для overlay UI_PIPE_ACTIVE (extended) или для RECYCLE-line (extended) */
 } pipe_data_t;
 
 static void pipe_data_free_cb(lv_event_t *e)
@@ -45,16 +49,24 @@ static void anim_translate_y_cb(void *obj, int32_t v)
     lv_obj_set_style_translate_y((lv_obj_t *)obj, v, 0);
 }
 
-static void start_flow_anim(lv_obj_t *obj, bool horizontal, int sign,
-                            int period_px, uint32_t duration_ms)
+static void start_flow_anim(lv_obj_t *obj, int x_step, int y_step,
+                            uint32_t duration_ms)
 {
+    /* Анимируем ту координату, по которой идёт поток. */
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, obj);
-    lv_anim_set_exec_cb(&a, horizontal ? anim_translate_x_cb : anim_translate_y_cb);
-    lv_anim_set_values(&a, 0, period_px * sign);
+    if (x_step != 0) {
+        lv_anim_set_exec_cb(&a, anim_translate_x_cb);
+        lv_anim_set_values(&a, 0, FLOW_PERIOD_PX * x_step);
+    } else {
+        lv_anim_set_exec_cb(&a, anim_translate_y_cb);
+        lv_anim_set_values(&a, 0, FLOW_PERIOD_PX * y_step);
+    }
     lv_anim_set_duration(&a, duration_ms);
     lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    /* path по умолчанию linear — нам нужна именно линейная скорость
+     * для seamless wrap-around (default = lv_anim_path_linear). */
     lv_anim_start(&a);
 }
 
@@ -80,7 +92,7 @@ static lv_color_t pipe_color(ui_pipe_kind_t k)
     }
 }
 
-/* ─── helper: создать прозрачный контейнер ─────────────────────────── */
+/* ─── helper: clipping-контейнер ─────────────────────────────────── */
 
 static lv_obj_t *make_clipping_box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -92,7 +104,7 @@ static lv_obj_t *make_clipping_box(lv_obj_t *parent, int x, int y, int w, int h)
     lv_obj_set_style_radius(box, 0, 0);
     lv_obj_set_style_pad_all(box, 0, 0);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-    /* Не выставляем OVERFLOW_VISIBLE — default = clip children. */
+    /* Не выставляем OVERFLOW_VISIBLE → default = clip children по bbox. */
     return box;
 }
 
@@ -104,13 +116,15 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
 {
     if (!parent) return NULL;
 
-    int width   = pipe_width(kind);
-    int half_w  = width / 2 + 1;
-    bool horizontal = (y1 == y2);
-    int delta = horizontal ? (x2 - x1) : (y2 - y1);
-    int sign  = (delta >= 0) ? 1 : -1;
+    int width  = pipe_width(kind);
+    int half_w = width / 2 + 1;
 
-    /* INACTIVE: статичная труба, без контейнера. */
+    /* Направление потока по компонентам. Поток всегда строго гор. или верт.
+     * для нашей мнемосхемы — диагоналей нет. */
+    int x_step = (x2 > x1) ? 1 : (x2 < x1) ? -1 : 0;
+    int y_step = (y2 > y1) ? 1 : (y2 < y1) ? -1 : 0;
+
+    /* INACTIVE — статика, без контейнера. */
     if (kind == UI_PIPE_INACTIVE) {
         pipe_data_t *d = lv_malloc_zeroed(sizeof(*d));
         if (!d) return NULL;
@@ -142,28 +156,33 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
     pipe_data_t *d = lv_malloc_zeroed(sizeof(*d));
     if (!d) return box;
 
-    /* Координаты внутри box — relative от его top-left. */
+    /* Координаты основного line — relative от top-left контейнера. */
     int rx1 = x1 - x_min + half_w;
     int ry1 = y1 - y_min + half_w;
     int rx2 = x2 - x_min + half_w;
     int ry2 = y2 - y_min + half_w;
-    d->pts[0].x = rx1; d->pts[0].y = ry1;
-    d->pts[1].x = rx2; d->pts[1].y = ry2;
 
-    /* Базовый line — внутри контейнера. */
-    lv_obj_t *line = lv_line_create(box);
-    lv_line_set_points(line, d->pts, 2);
-    lv_obj_set_style_line_width(line, width, 0);
-    lv_obj_set_style_line_color(line, pipe_color(kind), 0);
-    lv_obj_set_style_line_rounded(line, true, 0);
+    /* Координаты EXTENDED линии (выходит на FLOW_PERIOD_PX с каждой
+     * стороны в направлении потока). Эта линия будет анимирована —
+     * extension'ы вне видимой области служат «резервом» штрихов. */
+    int ex1 = rx1 - FLOW_PERIOD_PX * x_step;
+    int ey1 = ry1 - FLOW_PERIOD_PX * y_step;
+    int ex2 = rx2 + FLOW_PERIOD_PX * x_step;
+    int ey2 = ry2 + FLOW_PERIOD_PX * y_step;
 
     if (kind == UI_PIPE_ACTIVE) {
-        /* Overlay — белая dashed-линия 8+8=16 поверх solid pipe.
-         * Анимируется translate. Выходящая за концы box часть
-         * автоматически клипуется. */
-        d->overlay_pts[0].x = rx1; d->overlay_pts[0].y = ry1;
-        d->overlay_pts[1].x = rx2; d->overlay_pts[1].y = ry2;
+        /* Base — solid green pipe, без анимации, точные координаты. */
+        d->pts[0].x = rx1; d->pts[0].y = ry1;
+        d->pts[1].x = rx2; d->pts[1].y = ry2;
+        lv_obj_t *base = lv_line_create(box);
+        lv_line_set_points(base, d->pts, 2);
+        lv_obj_set_style_line_width(base, width, 0);
+        lv_obj_set_style_line_color(base, pipe_color(kind), 0);
+        lv_obj_set_style_line_rounded(base, true, 0);
 
+        /* Overlay — белый dashed, EXTENDED, анимирован translate. */
+        d->overlay_pts[0].x = ex1; d->overlay_pts[0].y = ey1;
+        d->overlay_pts[1].x = ex2; d->overlay_pts[1].y = ey2;
         lv_obj_t *overlay = lv_line_create(box);
         lv_line_set_points(overlay, d->overlay_pts, 2);
         lv_obj_set_style_line_color(overlay, ((lv_color_t)LV_COLOR_MAKE(0xff, 0xff, 0xff)), 0);
@@ -174,14 +193,20 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
         lv_obj_set_style_line_rounded(overlay, false, 0);
         lv_obj_remove_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
 
-        start_flow_anim(overlay, horizontal, sign, 16, 1400);
+        start_flow_anim(overlay, x_step, y_step, 1400);
     } else {
-        /* RECYCLE — сам line dashed (10+6 = 16). Анимируется он сам. */
+        /* RECYCLE — основная line сама dashed и EXTENDED, анимирована. */
+        d->overlay_pts[0].x = ex1; d->overlay_pts[0].y = ey1;
+        d->overlay_pts[1].x = ex2; d->overlay_pts[1].y = ey2;
+        lv_obj_t *line = lv_line_create(box);
+        lv_line_set_points(line, d->overlay_pts, 2);
+        lv_obj_set_style_line_width(line, width, 0);
+        lv_obj_set_style_line_color(line, pipe_color(kind), 0);
         lv_obj_set_style_line_dash_width(line, 10, 0);
         lv_obj_set_style_line_dash_gap(line, 6, 0);
         lv_obj_set_style_line_rounded(line, false, 0);
 
-        start_flow_anim(line, horizontal, sign, 16, 1600);
+        start_flow_anim(line, x_step, y_step, 1600);
     }
 
     lv_obj_set_user_data(box, d);
