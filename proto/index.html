@@ -20,7 +20,7 @@
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
-            padding: var(--gap-md);
+            padding: var(--gap-sm);  /* было gap-md, уменьшено для большего места под схему */
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -29,7 +29,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: var(--gap-md);
+            margin-bottom: var(--gap-sm);  /* было gap-md, уменьшено */
         }
         .mnemo-svg {
             flex: 1;
@@ -246,7 +246,7 @@
                      Каждый прибор связан leader-line с tap-point на трубопроводе.
                      Направление потока показано flow-animation (бегущие капли),
                      стрелки-маркеры не используются. -->
-                <svg class="mnemo-svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet">
+                <svg class="mnemo-svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMin meet">
 
                     <!-- ════════════════════════════════════════════════════════════
                          КОМПАКТНЫЙ LAYOUT 900×560:
