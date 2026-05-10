@@ -23,68 +23,83 @@
 
 ### Блокеры (чинить до заливки на стенд)
 
-1. **`sdkconfig` устарел — WDT timeout = 5с вместо 30с** (`sdkconfig:1458`)
+1. ✅ **`sdkconfig` устарел — WDT timeout = 5с вместо 30с** (`sdkconfig:1458`)
    `sdkconfig` сгенерирован под IDF 5.3.4 до того как `sdkconfig.defaults` стал требовать 30с WDT. UI-init не успеет, → паника при первом старте на железе.
    **Fix:** удалить `sdkconfig`, добавить в `.gitignore`, регенерировать через `idf.py reconfigure`.
+   **DONE (commit 6aae3cb)**
 
-2. **`portMAX_DELAY` в 15+ сеттерах `plant_data_set_*`** (`plant_data.c`)
+2. ✅ **`portMAX_DELAY` в 15+ сеттерах `plant_data_set_*`** (`plant_data.c`)
    Прямо нарушает правило проекта (CLAUDE.md контроллера). MQTT-task зависнет на mutex если UI-task застрянет в LVGL.
    **Fix:** заменить на `pdMS_TO_TICKS(50)`, на timeout — drop + лог.
+   **DONE (commit 6aae3cb)**
 
-3. **`portMAX_DELAY` во всех 7 функциях `alarm_ring_*`** (`alarm_ring.c:59,82,118,140,158,177,195`)
+3. ✅ **`portMAX_DELAY` во всех 7 функциях `alarm_ring_*`** (`alarm_ring.c:59,82,118,140,158,177,195`)
    То же что #2. UI читает 32 записи под mutex → MQTT блокируется на рендере экрана аварий.
    **Fix:** конечный таймаут + счётчик `dropped_alarms`.
+   **DONE (commit 6aae3cb)**
 
-4. **`display_init` падает → `app_main` молча `return` → "зомби" прошивка** (`app_main.c:79`)
+4. ✅ **`display_init` падает → `app_main` молча `return` → "зомби" прошивка** (`app_main.c:79`)
    FreeRTOS scheduler работает, idle-task пинает HW WDT, но устройство не делает ничего видимого. Оператор не поймёт что произошло.
    **Fix:** `esp_restart()` после `ESP_LOGE` или emergency-режим с MQTT-уведомлением.
+   **DONE (commit 6aae3cb)**
 
-5. **`ESP_ERROR_CHECK` в HAL → bootloop вместо degraded mode** (`display_init.c:86,95,102,108,135-138`)
+5. ✅ **`ESP_ERROR_CHECK` в HAL → bootloop вместо degraded mode** (`display_init.c:86,95,102,108,135-138`)
    Любой сбой DSI/LDO → `abort()`, противоречит «UI некритичен». На плате без панели — вечный bootloop.
    **Fix:** заменить на `goto cleanup` + `return NULL`.
+   **DONE (commit 6aae3cb)**
 
 ### Высокий приоритет
 
-6. **Ресурс-leak в `display_init.c`: LDO/LEDC/LVGL_port не освобождаются на cleanup** (`display_init.c:90-199`)
+6. ✅ **Ресурс-leak в `display_init.c`: LDO/LEDC/LVGL_port не освобождаются на cleanup** (`display_init.c:90-199`)
    На любой ошибке инициализации остаётся включённое питание PHY DSI без шанса вернуть, подвисший LVGL-таймер. Bootloop с прогрессирующим перегревом LDO.
    **Fix:** дополнить `cleanup:` всеми ресурсами в обратном порядке.
+   **DONE (commit 6aae3cb)**
 
-7. **Race в `parse_alarm` + неустановка `dirty_flags` в fallback** (`mqtt_parser.c:466-473`)
+7. ✅ **Race в `parse_alarm` + неустановка `dirty_flags` в fallback** (`mqtt_parser.c:466-473`)
    В fallback-ветке (mutex timeout) аларм добавлен в ring, но UI не подхватит. Пропущенная критическая авария на UI на несколько секунд. Также nested locking двух мьютексов.
    **Fix:** atomic-bool «alarms_dirty», push **вне** plant_data-лока. Зафиксировать порядок мьютексов в комментарии.
+   **DONE (commit 6aae3cb)**
 
-8. **Нет `controller_online` флага в plant_data → HMI показывает stale-данные** (`mqtt_parser.c:510`)
+8. ✅ **Нет `controller_online` флага в plant_data → HMI показывает stale-данные** (`mqtt_parser.c:510`)
    При получении `availability=offline` только лог. UI не показывает оператору что данные устарели → видит «AUTO RUNNING» с актуальными цифрами хотя контроллер мёртв.
    **Fix:** `bool controller_online` в plant_data, выставлять из availability-handler.
+   **DONE (commit 6aae3cb)**
 
-9. **`parse_state` затирает state на невалидном JSON** (`mqtt_parser.c:171-178`)
+9. ✅ **`parse_state` затирает state на невалидном JSON** (`mqtt_parser.c:171-178`)
    `parse_state_enum(NULL)` → `PLANT_STATE_UNKNOWN` → перезаписывает существующее состояние одним битым сообщением.
    **Fix:** обновлять только присутствующие поля либо отвергать весь объект.
+   **DONE (commit 6aae3cb)**
 
-10. **`waveshare/esp_lcd_jd9365_10_1: "*"` — версия незакреплена** (`idf_component.yml:6`)
+10. ✅ **`waveshare/esp_lcd_jd9365_10_1: "*"` — версия незакреплена** (`idf_component.yml:6`)
     Любое ломающее обновление → белый экран при пересборке.
     **Fix:** `"^1.0"` или `"~1.0.4"`.
+    **DONE (commit 6aae3cb)**
 
-11. **NVS save в UI-task без таймаута** (`plant_data.c:368-378`)
+11. ⏳ **NVS save в UI-task без таймаута** (`plant_data.c:368-378`)
     `nvs_set_blob + commit` блокируют 10-100 мс на flash write. UI зафризится после нажатия «Применить».
     **Fix:** очередь write-задач в low-priority worker.
+    **OPEN**
 
-12. **`ETH_GOT_IP_BIT` не сбрасывается на link-down** (`eth_init.c:69-72`)
+12. ✅ **`ETH_GOT_IP_BIT` не сбрасывается на link-down** (`eth_init.c:69-72`)
     `eth_wait_for_ip()` после потери и повторного получения IP вернёт ESP_OK мгновенно. Тихий баг, проявится при повторном использовании.
     **Fix:** `xEventGroupClearBits(..., ETH_GOT_IP_BIT)` в `IP_EVENT_ETH_LOST_IP`.
+    **DONE (commit 6aae3cb)**
 
 ### Средний приоритет, но влияет на качество
 
-13. **`MQTT_EVENT_DATA` фрагменты молча отбрасываются** (`mqtt_app.c:70-74`)
+13. ✅ **`MQTT_EVENT_DATA` фрагменты молча отбрасываются** (`mqtt_app.c:70-74`)
     Payload > 2 КБ → молчаливая потеря. `diagnostics` со всеми массивами modbus + stack может пухнуть.
     **Fix:** увеличить `buffer.size` до 4 КБ; либо собирать фрагменты по `msg_id`.
+    **DONE (commit 6aae3cb)**
 
-14. **Ресурс-leak в `eth_init.c:135-150`** — каскадные ошибки не освобождают MAC/PHY/netif
+14. ⏳ **Ресурс-leak в `eth_init.c:135-150`** — каскадные ошибки не освобождают MAC/PHY/netif
     **Fix:** `goto cleanup` + явное освобождение, либо `ESP_ERROR_CHECK` (для встроенного PHY приемлемо).
+    **OPEN**
 
-15. **`DIRTY_STATE` неправильно ставится в save_settings** (`plant_data.c:384,395,406,417`)
+15. ✅ **`DIRTY_STATE` неправильно ставится в save_settings** (`plant_data.c:384,395,406,417`)
     Все 4 save-функции ставят `DIRTY_STATE` вместо `DIRTY_SETTINGS` → UI перерисовывает не те виджеты.
     **Fix:** добавить `DIRTY_SETTINGS` в `plant_data.h`.
+    **DONE (commit 6aae3cb)**
 
 ---
 
@@ -248,11 +263,13 @@ main/
 
 ## 🛠 Рекомендуемый план работ
 
-### Спринт 1 (блокеры — 1 день)
+### ✅ Спринт 1 (блокеры — 1 день) — DONE 2026-05-10
 - **Top-1..5** — отказы при первом запуске на железе, нельзя заливать без них
+- **COMPLETED via commit 6aae3cb** тремя параллельными агентами
 
-### Спринт 2 (data integrity — 2 дня)
-- **Top-6..15** — потеря данных, скрытые баги, ресурс-leaks
+### 🟨 Спринт 2 (data integrity — 2 дня) — PARTIAL DONE
+- **Top-6..10, 12, 13, 15** — потеря данных, скрытые баги, ресурс-leaks → **DONE (commit 6aae3cb)**
+- **Top-11, 14** — остаются открытыми (требуют отдельной работы)
 
 ### Спринт 3 (зрелость — 3-5 дней)
 - Вся секция HIGH — backoff, версионирование зависимостей, partitions, WDT регистрация
@@ -267,3 +284,4 @@ main/
 ## История
 
 - **2026-05-10**: первое полное ревью HMI после интеграции с актуальным API контроллера. UI-слой не покрыт по запросу пользователя (предстоит переделка).
+- **2026-05-10 — commit 6aae3cb**: закрыто 13 из 15 Top-проблем (✅ Top-1..10, 12, 13, 15) тремя параллельными агентами за один спринт. Остаются открытыми: Top-11 (NVS worker queue для UI-блокировок) и Top-14 (eth_init resource leak на cascading errors).
