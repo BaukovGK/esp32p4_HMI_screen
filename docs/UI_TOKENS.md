@@ -241,7 +241,36 @@ void ui_theme_apply(theme_id_t id);
 const ui_palette_t *ui_theme_palette(void);
 ```
 
-### 8.2 Стили компонентов
+### 8.2 ISA-5.1 sensor circle (приборные индикаторы на мнемосхеме)
+
+Стандарт P&ID — круг с тегом сверху и значением снизу:
+
+```c
+// ui/ui_sensor_circle.c
+typedef struct {
+    lv_obj_t *container;   // прозрачный контейнер
+    lv_obj_t *frame;       // lv_arc или lv_canvas с кругом
+    lv_obj_t *divider;     // тонкая горизонтальная линия
+    lv_obj_t *tag_label;   // "P1", "Q3", "σ2"
+    lv_obj_t *value_label; // "3.2", "26.8", "1.2"
+    int last_state;        // ok / warn / danger / offline
+} sensor_circle_t;
+
+sensor_circle_t *sensor_circle_create(lv_obj_t *parent, const char *tag);
+void sensor_circle_set_value(sensor_circle_t *sc, float value, const char *fmt);
+void sensor_circle_set_state(sensor_circle_t *sc, int state);
+void sensor_circle_set_offline(sensor_circle_t *sc, bool offline);
+```
+
+Размеры:
+- Радиус круга 22 px (44 px диаметр)
+- font-size тег: 9 px
+- font-size значение: 11 px
+- font-size единицы (опц.): 7 px
+
+При state=danger — `lv_anim_*` на stroke-width (2 → 3.5 → 2 cycle 1.5s).
+
+### 8.3 Стили компонентов
 
 ```c
 // ui/ui_styles.c

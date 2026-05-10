@@ -80,12 +80,69 @@
         .mnemo-svg .equipment-active { fill: var(--accent-mute); stroke: var(--accent); stroke-width: 2; }
         .mnemo-svg .label { fill: var(--text-primary); font-size: 12px; font-weight: 600; font-family: inherit; }
         .mnemo-svg .label-sm { fill: var(--text-secondary); font-size: 10px; font-family: inherit; }
-        .mnemo-svg .sensor-tag { fill: var(--text-inverse); font-size: 10px; font-weight: 700; font-family: inherit; }
-        .mnemo-svg .sensor-bg { fill: var(--accent); stroke: none; }
-        .mnemo-svg .sensor-bg-warn { fill: var(--warning); }
-        .mnemo-svg .sensor-bg-danger { fill: var(--danger); }
         .mnemo-svg .arrow { fill: var(--pipe); }
         .mnemo-svg .arrow-active { fill: var(--pipe-active); }
+
+        /* ─── ISA-5.1 sensor circles (P&ID-style instrumentation tags) ─── */
+        .mnemo-svg .sc-frame {
+            fill: var(--bg-card);
+            stroke: var(--accent);
+            stroke-width: 2;
+        }
+        .mnemo-svg .sc-divider {
+            stroke: var(--accent);
+            stroke-width: 1;
+            opacity: 0.6;
+        }
+        .mnemo-svg .sc-tag {
+            fill: var(--text-secondary);
+            font-size: 9px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            letter-spacing: 0.3px;
+        }
+        .mnemo-svg .sc-value {
+            fill: var(--text-primary);
+            font-size: 11px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            font-variant-numeric: tabular-nums;
+        }
+        .mnemo-svg .sc-unit {
+            fill: var(--text-muted);
+            font-size: 7px;
+            font-weight: 500;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+        /* состояние warn — жёлтая рамка */
+        .mnemo-svg .sensor-circle.warn .sc-frame { stroke: var(--warning); }
+        .mnemo-svg .sensor-circle.warn .sc-divider { stroke: var(--warning); }
+        .mnemo-svg .sensor-circle.warn .sc-tag { fill: var(--warning); }
+        /* состояние danger — красная рамка + анимация */
+        .mnemo-svg .sensor-circle.danger .sc-frame {
+            stroke: var(--danger);
+            animation: sc-pulse 1.5s ease-in-out infinite;
+        }
+        .mnemo-svg .sensor-circle.danger .sc-divider { stroke: var(--danger); }
+        .mnemo-svg .sensor-circle.danger .sc-tag { fill: var(--danger); }
+        .mnemo-svg .sensor-circle.danger .sc-value { fill: var(--danger); }
+        @keyframes sc-pulse {
+            0%, 100% { stroke-width: 2; }
+            50% { stroke-width: 3.5; }
+        }
+        /* offline / no-data — серая рамка, значение «—» */
+        .mnemo-svg .sensor-circle.offline .sc-frame {
+            stroke: var(--border-strong);
+            stroke-dasharray: 4 2;
+        }
+        .mnemo-svg .sensor-circle.offline .sc-tag,
+        .mnemo-svg .sensor-circle.offline .sc-value { fill: var(--text-muted); }
     </style>
 </head>
 <body>
@@ -116,8 +173,12 @@
                     </div>
                 </div>
 
-                <!-- SVG мнемосхема установки -->
-                <svg class="mnemo-svg" viewBox="0 0 880 670" preserveAspectRatio="xMidYMid meet">
+                <!-- SVG мнемосхема установки. Sensor circles — стандарт ISA-5.1
+                     P&ID: круг с тегом наверху (P1, Q1, σ1...) и значением внизу. -->
+                <svg class="mnemo-svg" viewBox="0 0 900 670" preserveAspectRatio="xMidYMid meet">
+
+                    <!-- ─── переиспользуемый шаблон: <use href="#sensor"/> с inline data ───
+                         Используем inline-группы т.к. inline data в LVGL быстрее. -->
 
                     <!-- ===== Исходная ёмкость (top-left) ===== -->
                     <rect class="tank" x="20" y="20" width="120" height="120" rx="8"/>
@@ -134,16 +195,22 @@
                     <text class="label" x="80" y="225" text-anchor="middle" data-i18n="main.pump_pre">Преднагн.</text>
                     <text class="label-sm" x="80" y="245" text-anchor="middle">RO1 · DI6 ●</text>
 
-                    <!-- датчик P1 + Q1 + σ1 в форме pill-tag -->
-                    <g transform="translate(140, 215)">
-                        <rect class="sensor-bg" x="0" y="0" width="40" height="14" rx="3"/>
-                        <text class="sensor-tag" x="20" y="11" text-anchor="middle">P1 3.2</text>
-                        <rect class="sensor-bg" x="0" y="16" width="40" height="14" rx="3"/>
-                        <text class="sensor-tag" x="20" y="27" text-anchor="middle">Q1 2.5</text>
-                    </g>
-
                     <!-- труба к фильтру -->
-                    <line class="pipe-active" x1="120" y1="230" x2="220" y2="230"/>
+                    <line class="pipe-active" x1="120" y1="230" x2="200" y2="230"/>
+
+                    <!-- ─── ISA sensor circles на участке (P1, Q1, σ1) — после преднагнетания ─── -->
+                    <g class="sensor-circle" transform="translate(150,180)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">P1</text>
+                        <text class="sc-value" y="11">3.2</text>
+                    </g>
+                    <g class="sensor-circle" transform="translate(150,290)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">Q1</text>
+                        <text class="sc-value" y="11">2.5</text>
+                    </g>
 
                     <!-- Дозатор (сверху, ответвление от преднагнетания) -->
                     <rect class="equipment-bg" x="40" y="280" width="80" height="50" rx="6"/>
@@ -152,47 +219,71 @@
                     <line class="pipe" x1="80" y1="260" x2="80" y2="280"/>
 
                     <!-- ===== Фильтр мехочистки ===== -->
-                    <rect class="equipment-bg" x="220" y="200" width="100" height="60" rx="6"/>
-                    <text class="label" x="270" y="225" text-anchor="middle" data-i18n="main.filter">Фильтр</text>
-                    <text class="label-sm" x="270" y="245" text-anchor="middle">P2: 2.9</text>
+                    <rect class="equipment-bg" x="200" y="200" width="100" height="60" rx="6"/>
+                    <text class="label" x="250" y="225" text-anchor="middle" data-i18n="main.filter">Фильтр</text>
+                    <text class="label-sm" x="250" y="245" text-anchor="middle">мехочистки</text>
 
-                    <!-- труба к насосу 1 ст. -->
-                    <line class="pipe-active" x1="320" y1="230" x2="380" y2="230"/>
+                    <!-- труба после фильтра -->
+                    <line class="pipe-active" x1="300" y1="230" x2="380" y2="230"/>
+
+                    <!-- ─── P2 sensor circle после фильтра ─── -->
+                    <g class="sensor-circle" transform="translate(335,185)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">P2</text>
+                        <text class="sc-value" y="11">2.9</text>
+                    </g>
 
                     <!-- ===== Насос 1-й ступени ===== -->
                     <rect class="equipment-active" x="380" y="200" width="80" height="60" rx="6"/>
                     <text class="label" x="420" y="225" text-anchor="middle" data-i18n="main.pump_st1">1-я ст.</text>
                     <text class="label-sm" x="420" y="245" text-anchor="middle">RO2 · DI7 ●</text>
 
-                    <!-- датчик P3 -->
-                    <g transform="translate(465, 220)">
-                        <rect class="sensor-bg" x="0" y="0" width="40" height="14" rx="3"/>
-                        <text class="sensor-tag" x="20" y="11" text-anchor="middle">P3 26.8</text>
-                    </g>
-
                     <!-- труба к мембране 1 -->
                     <line class="pipe-active" x1="460" y1="230" x2="560" y2="230"/>
+
+                    <!-- ─── P3 sensor circle (с предупреждением что P3 ближе к лимиту) ─── -->
+                    <g class="sensor-circle" transform="translate(515,185)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">P3</text>
+                        <text class="sc-value" y="11">26.8</text>
+                    </g>
 
                     <!-- ===== Мембрана 1-й ступени ===== -->
                     <rect class="equipment-active" x="560" y="180" width="120" height="100" rx="6"/>
                     <text class="label" x="620" y="220" text-anchor="middle" data-i18n="main.membrane1">Мембрана 1ст.</text>
                     <line x1="560" y1="230" x2="680" y2="230" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
-                    <text class="label-sm" x="620" y="265" text-anchor="middle">σ2: 18.4</text>
 
                     <!-- пермеат вниз к промежуточной -->
                     <line class="pipe-active" x1="620" y1="280" x2="620" y2="350"/>
                     <polygon class="arrow-active" points="614,346 626,346 620,356"/>
 
-                    <!-- концентрат вправо (рецикл) -->
-                    <line class="pipe-recycle" x1="680" y1="220" x2="800" y2="220"/>
-                    <line class="pipe-recycle" x1="800" y1="220" x2="800" y2="100"/>
-                    <line class="pipe-recycle" x1="800" y1="100" x2="380" y2="100"/>
-                    <line class="pipe-recycle" x1="380" y1="100" x2="380" y2="200"/>
-                    <text class="label-sm" x="720" y="215" text-anchor="middle">Q2: 0.8 → рецикл</text>
+                    <!-- ─── σ2 sensor circle на пермеате 1ст ─── -->
+                    <g class="sensor-circle" transform="translate(670,310)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">σ2</text>
+                        <text class="sc-value" y="11">18.4</text>
+                    </g>
 
-                    <!-- Q2 + дренаж -->
+                    <!-- концентрат вправо (рецикл, dashed) -->
+                    <line class="pipe-recycle" x1="680" y1="220" x2="820" y2="220"/>
+                    <line class="pipe-recycle" x1="820" y1="220" x2="820" y2="100"/>
+                    <line class="pipe-recycle" x1="820" y1="100" x2="380" y2="100"/>
+                    <line class="pipe-recycle" x1="380" y1="100" x2="380" y2="200"/>
+
+                    <!-- ─── Q2 sensor circle на рециркуляции ─── -->
+                    <g class="sensor-circle" transform="translate(750,150)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">Q2</text>
+                        <text class="sc-value" y="11">0.8</text>
+                    </g>
+
+                    <!-- Q2 → дренаж (короткое ответвление) -->
                     <line class="pipe" x1="680" y1="240" x2="730" y2="240"/>
-                    <text class="label-sm" x="725" y="258" text-anchor="middle">→ дренаж</text>
+                    <text class="label-sm" x="755" y="244">→ дренаж</text>
 
                     <!-- ===== Промежуточная ёмкость ===== -->
                     <rect class="tank" x="540" y="350" width="160" height="100" rx="8"/>
@@ -209,19 +300,35 @@
                     <text class="label" x="390" y="395" text-anchor="middle" data-i18n="main.pump_st2">2-я ст.</text>
                     <text class="label-sm" x="390" y="415" text-anchor="middle">RO3 · DI8 ●</text>
 
-                    <!-- датчик P4 -->
-                    <g transform="translate(310, 390)">
-                        <rect class="sensor-bg" x="0" y="0" width="36" height="14" rx="3"/>
-                        <text class="sensor-tag" x="18" y="11" text-anchor="middle">P4 6.5</text>
-                    </g>
-
-                    <!-- труба к мембране 2 -->
+                    <!-- труба к мmembрane 2 -->
                     <line class="pipe-active" x1="350" y1="400" x2="220" y2="400"/>
+
+                    <!-- ─── P4 sensor circle ─── -->
+                    <g class="sensor-circle" transform="translate(285,355)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">P4</text>
+                        <text class="sc-value" y="11">6.5</text>
+                    </g>
 
                     <!-- ===== Мембрана 2-й ступени ===== -->
                     <rect class="equipment-active" x="100" y="370" width="120" height="60" rx="6"/>
                     <text class="label" x="160" y="395" text-anchor="middle" data-i18n="main.membrane2">Мембрана 2ст.</text>
-                    <text class="label-sm" x="160" y="415" text-anchor="middle">σ3: 1.2 · Q3: 1.4</text>
+                    <line x1="100" y1="400" x2="220" y2="400" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
+
+                    <!-- ─── σ3 + Q3 sensor circles на пермеате 2ст (выход) ─── -->
+                    <g class="sensor-circle" transform="translate(50,460)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">σ3</text>
+                        <text class="sc-value" y="11">1.2</text>
+                    </g>
+                    <g class="sensor-circle" transform="translate(265,460)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">Q3</text>
+                        <text class="sc-value" y="11">1.4</text>
+                    </g>
 
                     <!-- пермеат вниз к чистой ёмкости -->
                     <line class="pipe-active" x1="160" y1="430" x2="160" y2="540"/>
@@ -229,10 +336,17 @@
 
                     <!-- концентрат от мембраны 2 (только рецикл, без дренажа) -->
                     <line class="pipe-recycle" x1="220" y1="390" x2="280" y2="390"/>
-                    <line class="pipe-recycle" x1="280" y1="390" x2="280" y2="500"/>
-                    <line class="pipe-recycle" x1="280" y1="500" x2="540" y2="500"/>
-                    <line class="pipe-recycle" x1="540" y1="500" x2="540" y2="430"/>
-                    <text class="label-sm" x="400" y="495" text-anchor="middle">Q4: 0.5 → рецикл 2ст.</text>
+                    <line class="pipe-recycle" x1="280" y1="390" x2="280" y2="540"/>
+                    <line class="pipe-recycle" x1="280" y1="540" x2="540" y2="540"/>
+                    <line class="pipe-recycle" x1="540" y1="540" x2="540" y2="430"/>
+
+                    <!-- ─── Q4 sensor circle на рецикле концентрата 2ст ─── -->
+                    <g class="sensor-circle" transform="translate(420,540)">
+                        <circle class="sc-frame" r="22"/>
+                        <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                        <text class="sc-tag" y="-10">Q4</text>
+                        <text class="sc-value" y="11">0.5</text>
+                    </g>
 
                     <!-- ===== Чистая (продуктовая) ёмкость ===== -->
                     <rect class="tank" x="100" y="540" width="120" height="110" rx="8"/>
@@ -241,7 +355,7 @@
                     <text class="label-sm" x="160" y="640" text-anchor="middle">DI4: ○</text>
 
                     <!-- ===== Легенда (правый низ) ===== -->
-                    <g transform="translate(620, 540)">
+                    <g transform="translate(700, 470)">
                         <text class="label-sm" x="0" y="0">Легенда:</text>
                         <line class="pipe-active" x1="0" y1="20" x2="40" y2="20"/>
                         <text class="label-sm" x="50" y="24">Активный поток</text>
@@ -249,6 +363,14 @@
                         <text class="label-sm" x="50" y="44">Не активен</text>
                         <line class="pipe-recycle" x1="0" y1="60" x2="40" y2="60"/>
                         <text class="label-sm" x="50" y="64">Рецикл / концентрат</text>
+                        <!-- образец sensor circle -->
+                        <g class="sensor-circle" transform="translate(20,100)">
+                            <circle class="sc-frame" r="14"/>
+                            <line class="sc-divider" x1="-14" y1="0" x2="14" y2="0"/>
+                            <text class="sc-tag" y="-6" style="font-size:7px">P</text>
+                            <text class="sc-value" y="6" style="font-size:8px">99</text>
+                        </g>
+                        <text class="label-sm" x="50" y="104">Прибор (тег / значение)</text>
                     </g>
 
                 </svg>
