@@ -361,7 +361,7 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
      * через SX/SY (которые 1:1 mapping для текущего MNEMO_SCALE=1.0). */
     lv_obj_t *canvas = lv_obj_create(mnemo_card);
     lv_obj_set_size(canvas, MNEMO_PX_W, MNEMO_PX_H);
-    lv_obj_align(canvas, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(canvas, LV_ALIGN_TOP_MID, 30, 50);
     lv_obj_set_style_bg_opa(canvas, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(canvas, 0, 0);
     lv_obj_set_style_radius(canvas, 0, 0);
