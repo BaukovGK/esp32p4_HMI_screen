@@ -85,12 +85,22 @@ typedef struct {
     bool  ok;       // Канал исправен
 } flow_channel_t;
 
-/** Канал кондуктометра (s1-s3) */
+/** Канал кондуктометра (s1-s4: FEED, PERM1, PERM2, CONC) */
 typedef struct {
     float conductivity; // Электропроводность, мкСм/см (NAN при неисправности)
     float temperature;  // Температура компенсации, градусы C
     bool  ok;           // Канал исправен
 } cond_channel_t;
+
+/** Снимок данных с цифрового счётчика электроэнергии KWS-306L (LP / HP насос). */
+typedef struct {
+    float voltage;       // Напряжение, В (NAN если offline)
+    float current;       // Ток, А (NAN если offline)
+    float power;         // Активная мощность, Вт (NAN если offline)
+    float energy;        // Накопленная энергия, кВт·ч (NAN если offline)
+    float temperature;   // Температура счётчика, °C (NAN если offline)
+    bool  online;        // Modbus-устройство отвечает
+} power_meter_data_t;
 
 /** Расчётная телеметрия (вычисляется контроллером на основе датчиков) */
 typedef struct {
@@ -199,7 +209,10 @@ typedef struct {
     flow_channel_t flow[4];         // Расходомеры Q1..Q4
 
     /* --- Кондуктометры --- */
-    cond_channel_t conductivity[3]; // Кондуктометры s1..s3
+    cond_channel_t conductivity[4]; // Кондуктометры s1..s4 (FEED, PERM1, PERM2, CONC)
+
+    /* --- Счётчики электроэнергии KWS-306L (3-фазные) --- */
+    power_meter_data_t pumps[2];    // [0] = LP-насос (НД), [1] = HP-насос (ВД)
 
     /* --- Расчётная телеметрия --- */
     telemetry_t telemetry;
@@ -239,7 +252,8 @@ typedef struct {
 #define DIRTY_DOSER         (1u << 7)   // Изменилось состояние дозатора
 #define DIRTY_DIAGNOSTICS   (1u << 8)   // Изменилась диагностика
 #define DIRTY_ALARMS        (1u << 9)   // Изменился журнал аварий
-#define DIRTY_ALL           (0x3FFu)    // Все флаги (биты 0..9)
+#define DIRTY_POWER         (1u << 10)  // Изменились данные KWS-306L (LP / HP)
+#define DIRTY_ALL           (0x7FFu)    // Все флаги (биты 0..10)
 
 /* DI — Цифровые входы (битовые маски) */
 #define DI_SOURCE_LOW    (1u << 0)   /* DI1: нижний уровень исходной ёмкости  */
@@ -326,8 +340,15 @@ void plant_data_set_temperature(float value, bool fault);
 /** Установить данные расходомера (idx: 0=Q1, 1=Q2, 2=Q3, 3=Q4) */
 void plant_data_set_flow(int idx, float flow, float volume, bool ok);
 
-/** Установить данные кондуктометра (idx: 0=s1, 1=s2, 2=s3) */
+/** Установить данные кондуктометра (idx: 0=s1, 1=s2, 2=s3, 3=s4) */
 void plant_data_set_conductivity(int idx, float cond, float temp, bool ok);
+
+/**
+ * Установить данные счётчика электроэнергии KWS-306L.
+ * @param idx   0 = LP-насос (низкого давления), 1 = HP-насос (высокого давления)
+ * @param data  снимок параметров (копируется внутрь plant_data)
+ */
+void plant_data_set_power_meter(int idx, const power_meter_data_t *data);
 
 /** Установить расчётную телеметрию (копирование структуры) */
 void plant_data_set_telemetry(const telemetry_t *tel);
@@ -343,3 +364,19 @@ void plant_data_set_diagnostics(const diagnostics_t *diag);
 
 /** Установить статус MQTT-соединения (для отображения на HMI) */
 void plant_data_set_mqtt_status(bool connected);
+
+/* ---- Удобные геттеры (потокобезопасные, копируют под мьютексом) ---- */
+
+/**
+ * Получить копию снимка данных LP-насоса (счётчик KWS-306L).
+ * Захватывает мьютекс на время копирования.
+ * @return структура с данными; .online=false если timeout мьютекса
+ */
+power_meter_data_t plant_data_get_power_lp(void);
+
+/**
+ * Получить копию снимка данных HP-насоса (счётчик KWS-306L).
+ * Захватывает мьютекс на время копирования.
+ * @return структура с данными; .online=false если timeout мьютекса
+ */
+power_meter_data_t plant_data_get_power_hp(void);

@@ -99,9 +99,18 @@ void plant_data_init(void)
         s_data.flow[i].volume = NAN;
     }
     s_data.temperature.value = NAN;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         s_data.conductivity[i].conductivity = NAN;
         s_data.conductivity[i].temperature = NAN;
+    }
+    /* KWS-306L: до прихода первого MQTT-сообщения данные неизвестны (NAN, offline) */
+    for (int i = 0; i < 2; i++) {
+        s_data.pumps[i].voltage     = NAN;
+        s_data.pumps[i].current     = NAN;
+        s_data.pumps[i].power       = NAN;
+        s_data.pumps[i].energy      = NAN;
+        s_data.pumps[i].temperature = NAN;
+        s_data.pumps[i].online      = false;
     }
 
     // Уставки по умолчанию (до получения актуальных от контроллера или NVS)
@@ -246,15 +255,26 @@ void plant_data_set_flow(int idx, float flow, float volume, bool ok)
     xSemaphoreGive(s_mutex);
 }
 
-/** Установить данные кондуктометра по индексу (0=s1 .. 2=s3) */
+/** Установить данные кондуктометра по индексу (0=s1 .. 3=s4) */
 void plant_data_set_conductivity(int idx, float cond, float temp, bool ok)
 {
-    if (idx < 0 || idx >= 3) return; // защита от выхода за границы массива
+    if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_data.conductivity[idx].conductivity = cond;
     s_data.conductivity[idx].temperature = temp;
     s_data.conductivity[idx].ok = ok;
     s_data.dirty_flags |= DIRTY_CONDUCTIVITY;
+    s_data.last_msg_time_us = esp_timer_get_time();
+    xSemaphoreGive(s_mutex);
+}
+
+/** Установить снимок данных счётчика KWS-306L (idx: 0=LP, 1=HP) */
+void plant_data_set_power_meter(int idx, const power_meter_data_t *data)
+{
+    if (idx < 0 || idx >= 2 || !data) return;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_data.pumps[idx] = *data; // структурное копирование
+    s_data.dirty_flags |= DIRTY_POWER;
     s_data.last_msg_time_us = esp_timer_get_time();
     xSemaphoreGive(s_mutex);
 }
@@ -314,6 +334,30 @@ void plant_data_set_mqtt_status(bool connected)
     s_data.dirty_flags |= DIRTY_STATE;
     xSemaphoreGive(s_mutex);
 }
+
+/* ---- Удобные геттеры для KWS-306L ---- */
+
+/**
+ * Внутренний помощник: вернуть копию снимка pumps[idx] под мьютексом.
+ * При недоступности мьютекса возвращает структуру с .online=false.
+ */
+static power_meter_data_t pump_get_copy(int idx)
+{
+    power_meter_data_t out = {
+        .voltage = NAN, .current = NAN, .power = NAN,
+        .energy = NAN, .temperature = NAN, .online = false,
+    };
+    if (idx < 0 || idx >= 2) return out;
+    /* Конечный таймаут вместо portMAX_DELAY — UI не должен блокироваться надолго */
+    if (xSemaphoreTake(s_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+        out = s_data.pumps[idx];
+        xSemaphoreGive(s_mutex);
+    }
+    return out;
+}
+
+power_meter_data_t plant_data_get_power_lp(void) { return pump_get_copy(0); }
+power_meter_data_t plant_data_get_power_hp(void) { return pump_get_copy(1); }
 
 /* ---- Сохранение уставок в NVS (вызывается из UI-задачи после "Применить") ---- */
 

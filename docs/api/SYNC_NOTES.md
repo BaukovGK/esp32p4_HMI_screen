@@ -1,73 +1,59 @@
-# Расхождения HMI vs API контроллера
+# Журнал синхронизации HMI ↔ API контроллера
 
-> Сравнение текущего кода HMI (`main/mqtt/mqtt_topics.h`, `yaml/ro_plant_sensors.yaml`) с актуальным API контроллера (`docs/api/asyncapi.yaml`, скопировано из `BaukovGK/esp32s3_main_controller` на 2026-05-10).
+> Источник истины: `docs/api/asyncapi.yaml` и `docs/api/openapi.yaml` —
+> копии из `BaukovGK/esp32s3_main_controller`, ветка `dev`. Полное расхождение
+> между HMI и реальной прошивкой контроллера выясняется чтением реальных
+> файлов прошивки (`components/mqtt_app/mqtt_subscribe.c` и `mqtt_publish.c`),
+> а не по поверхностным пунктам в чек-листах.
 
-## TL;DR
+---
 
-HMI был разработан до серии расширений API контроллера. Чтобы HMI корректно работал с актуальной прошивкой ESP32-S3, нужно устранить **7 категорий расхождений**:
+## Статус интеграции на 2026-05-10
 
-| # | Категория | Серьёзность | Где править |
+**HMI компилируется и запускается.** В этой итерации MQTT/data слой адаптирован под актуальный API контроллера. UI-виджеты для новых данных (s4 conductivity, KWS power) — следующая итерация.
+
+### ✅ Реализовано в HMI (P1)
+
+| # | Что | Где | Заметка |
 |---|---|---|---|
-| 1 | Регистр имён топиков (`P1` vs `p0`, `Q1` vs `q0`, `s1` vs `s0`, `T` vs `t`) | 🔴 P0 | `yaml/ro_plant_sensors.yaml` |
-| 2 | Команды mode (`AUTO` vs `start_auto`, `IDLE` vs `stop`, ...) | 🔴 P0 | `yaml/ro_plant_sensors.yaml`, кнопки UI |
-| 3 | Структура JSON: один объект на топик vs отдельные подтопики на поле | 🟠 P0 | `main/mqtt/mqtt_parser.c` |
-| 4 | 4-й канал conductivity `s4` (концентрат) | 🔴 P1 | sensors.yaml + plant_data.h + UI |
-| 5 | KWS-306L (`power/lp`, `power/hp`) — полностью новое | 🔴 P1 | весь HMI: data + parser + UI экран |
-| 6 | Префикс настроек: `settings/` vs `config/` | 🟠 P1 | mqtt_topics.h |
-| 7 | Алармы: `alarms/active` + `alarms/history` vs единый `ro_plant/alarms` | 🟡 P2 | mqtt_parser, alarm_ring |
+| 1 | **Conductivity 4-й канал `s4`** (концентрат) | `plant_data.h` массив 3→4; `mqtt_parser.c` ветка `s4` | Данные собираются и хранятся; UI пока показывает только s1..s3 |
+| 2 | **KWS-306L** (`power/lp`, `power/hp`) | новая `power_meter_data_t`; `pumps[2]` в `plant_data_t`; setter+геттеры; парсер | UI экран «Энергопотребление» — следующая итерация |
+| 3 | **Diagnostics `modbus`** — массив объектов `[{addr,errors,online},…]` (раньше HMI ожидал параллельные массивы) | `mqtt_parser.c` | Реальный bug — теперь HMI читает корректно |
+| 4 | **Controller availability** (LWT топик `ro_plant/availability`) | `mqtt_app.c` подписка | Сейчас только логгируется; флаг `controller_online` в `plant_data_t` — следующая итерация |
+| 5 | `MQTT_TOPIC_POWER_PREFIX` + `MQTT_TOPIC_AVAILABILITY` | `mqtt_topics.h` | |
+
+### 🟡 Осталось (UI-уровень)
+
+| # | Что | Приоритет |
+|---|---|---|
+| 1 | UI виджет σ4 на экране «Параметры»/«Мнемосхема» (циклы захардкожены `< 3`) | P1 |
+| 2 | UI экран «Энергопотребление» (V/A/W/kWh/T × 2 насоса) | P1 |
+| 3 | UI индикатор `controller_online` (по топику `ro_plant/availability`) | P2 |
+| 4 | Новые alarm-коды (0x00C1..0x00D7) — отображаются автоматически если HMI не фильтрует по коду | P2 |
 
 ---
 
-## Маппинг старое → новое (P0)
+## Опровергнутые «расхождения» (бывший SYNC_NOTES P0)
 
-### 1. Регистр имён каналов
+Предыдущая версия этого файла содержала ошибочные пункты, которые **не подтвердились** при сверке с реальным кодом контроллера (`Controller/components/mqtt_app/mqtt_subscribe.c` и `mqtt_publish.c`):
 
-```yaml
-# БЫЛО:                         СТАНЕТ:
-analog/p0..p3                 → analog/P1..P4
-analog/t                      → analog/T
-flow/q0..q3                   → flow/Q1..Q4
-conductivity/s0..s2           → conductivity/s1..s4   (s4 НОВЫЙ — концентрат)
-```
+| Пункт | Статус | Что на самом деле |
+|---|---|---|
+| ~~Регистр топиков `P1` vs `p0` etc.~~ | ✅ HMI уже корректен | Контроллер публикует `analog/P1..P4`, `flow/Q1..Q4`, `conductivity/s1..s4`, `analog/T` — HMI подписывается на эти же. |
+| ~~Команды mode `AUTO/IDLE/MANUAL/WASHING`~~ | ✅ HMI уже корректен | Контроллер ожидает `start_auto / stop / start_washing / confirm_wash / set_manual / reset_fault`. См. `mqtt_subscribe.c:24-29`. asyncapi.yaml:245 описывает это правильно. |
+| ~~Префикс `settings/` → `config/`~~ | ✅ HMI уже корректен | Контроллер слушает на `ro_plant/settings/#` (`mqtt_subscribe.c:196,224`). |
+| ~~JSON структура: один объект на топик vs подтопики~~ | ✅ HMI уже корректен | Парсер HMI всегда работал через cJSON, разворачивая один JSON-объект из топика на поля структуры. |
+| ~~Алармы: `name`/`category`/`raised_us`~~ | ✅ HMI уже корректен | Контроллер публикует `{id, ts, cat, code, value, active}` (`mqtt_publish.c:188-190`). asyncapi.yaml:572 — правильная схема. |
 
-### 2. Команды mode
-
-```yaml
-# Контроллер слушает ro_plant/command/mode и принимает только эти 4 значения:
-"AUTO"     # вместо "start_auto"
-"IDLE"     # вместо "stop"
-"MANUAL"   # вместо "set_manual"
-"WASHING"  # вместо "start_washing"
-
-# "confirm_wash", "reset_fault" — отдельные каналы, см. asyncapi.yaml
-```
-
-### 3. JSON структура (НЕ отдельные подтопики)
-
-Контроллер публикует **один JSON-объект на топик**, не множество подтопиков:
-
-```
-ro_plant/status/conductivity/s1
-  → {"conductivity": 50.2, "temperature": 25.3, "ok": true}
-ro_plant/status/flow/Q1
-  → {"flow": 1.523, "volume": 234.5, "ok": true}
-ro_plant/status/telemetry
-  → {"filter_dp":0.45, "stage1_feed":1.5, "recovery2":75.3, "recovery_sys":50.1, "sel1":98.5, "sel2":99.1}
-ro_plant/status/diagnostics
-  → {"heap_free":145236, "heap_min":102544, "uptime_s":3600, "task_stack":[...], "modbus":{...}}
-ro_plant/status/power/{lp,hp}
-  → {"voltage":230.5, "current":5.2, "power":1205, "energy":12.4, "temperature":45, "online":true}
-```
-
-Топики типа `flow/q0_vol`, `conductivity/s0_temp`, `telemetry/recovery`, `diagnostics/heap_free` **не существуют** — нужно парсить JSON (`cJSON` в HMI уже подключен).
+**Вывод:** SYNC_NOTES первой версии был сгенерирован на основе устаревших гипотез без сверки с реальной прошивкой. Не доверяй чек-листам, которые не подкреплены ссылками на конкретные строки в коде контроллера.
 
 ---
 
-## Полный API — `asyncapi.yaml` и `openapi.yaml`
+## Источник истины — машиночитаемые спеки
 
-Все каналы, формат сообщений, QoS, retain — формализованы в:
-- **`docs/api/asyncapi.yaml`** — 20 каналов / 23 message-схемы (MQTT)
-- **`docs/api/openapi.yaml`** — 18 endpoints (REST API контроллера; HMI обычно не использует, но если нужно — есть)
+Все каналы, формат сообщений, QoS, retain — формализованы в `docs/api/`:
+- **`asyncapi.yaml`** — 20 каналов / 23 message-схемы (MQTT)
+- **`openapi.yaml`** — 18 endpoints (REST API контроллера)
 
 Просмотр в браузере:
 ```bash
@@ -83,43 +69,9 @@ npx @apidevtools/swagger-cli validate docs/api/openapi.yaml
 
 ---
 
-## Новые alarm-коды (приходят в `ro_plant/alarms`)
+## История изменений
 
-Расширение списка кодов. Полный enum — в `asyncapi.yaml::AlarmCode`. Новые с прошлой синхронизации:
-
-| Hex | Имя | Категория |
-|---|---|---|
-| 0x00C1 | PUMP_LP_NO_CURRENT | CRITICAL |
-| 0x00C2 | PUMP_HP_NO_CURRENT | CRITICAL |
-| 0x00C3 | PUMP_LP_OVERTEMP | CRITICAL |
-| 0x00C4 | PUMP_HP_OVERTEMP | CRITICAL |
-| 0x00C5 | KWS_VOLTAGE_OOR | ALARM |
-| 0x00C6 | KWS_OFFLINE | WARNING |
-| 0x00D0..0x00D7 | DEV_CHECK / AI / SL21 / URZH / KWS RANGE_OOR | ALARM (диагностика) |
-
-Структура сообщения:
-```json
-{"code": 193, "name": "PUMP_LP_NO_CURRENT", "category": "CRITICAL",
- "data": 0.05, "raised_us": 1234567890, "active": true}
-```
-
----
-
-## Чек-лист интеграции
-
-- [ ] **P0** Регистр имён каналов в `yaml/ro_plant_sensors.yaml`
-- [ ] **P0** Payload команд mode (4 значения вместо 6 кастомных)
-- [ ] **P0** Парсер MQTT — читать JSON-объект на топик
-- [ ] **P1** 4-й канал conductivity (`s4` = концентрат)
-- [ ] **P1** Топики `power/lp` и `power/hp` + UI «Энергопотребление»
-- [ ] **P1** Префикс `settings/` → `config/` (либо настройки в контроллер не доходят)
-- [ ] **P2** Алармы — единый топик `ro_plant/alarms` (без подтопиков active/history)
-- [ ] **P2** Новые alarm-коды (0x00C1..0x00D7) в alarm_ring и UI
-
-После каждого шага — проверить через `mosquitto_sub -t 'ro_plant/#' -v` что HMI получает данные на ожидаемых топиках.
-
----
-
-## История
-
-- **2026-05-10**: первая синхронизация API в HMI-репо. Скопированы `asyncapi.yaml`, `openapi.yaml`, `README.md` + 3 doc-файла из контроллера. Создан этот SYNC_NOTES.md.
+- **2026-05-10**: первая итерация интеграции.
+  - Скопированы `asyncapi.yaml`, `openapi.yaml`, `README.md` и 3 doc-файла из контроллера.
+  - В HMI: добавлен 4-й канал conductivity (`s4`), поддержка KWS-306L (`power_meter_data_t` + парсер + подписки), исправлен парсинг массива `diagnostics.modbus`, подписка на `ro_plant/availability`.
+  - SYNC_NOTES переписан после сверки с реальным кодом контроллера: убраны ложные «расхождения» по командам mode / префиксу settings / структуре JSON / схеме алармов.

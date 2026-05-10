@@ -19,6 +19,9 @@
 /** Подписка на аварийные сообщения */
 #define MQTT_TOPIC_ALARMS           "ro_plant/alarms"
 
+/** Availability контроллера (LWT). Контроллер публикует "online"/"offline". */
+#define MQTT_TOPIC_AVAILABILITY     "ro_plant/availability"
+
 /* Статусные топики (для маршрутизации входящих сообщений) */
 
 /** Состояние установки: state, auto_sub, wash_sub, fault_flags */
@@ -33,8 +36,14 @@
 /** Префикс расходомеров (+ Q1, Q2, Q3, Q4) */
 #define MQTT_TOPIC_FLOW_PREFIX      "ro_plant/status/flow/"
 
-/** Префикс кондуктометров (+ s1, s2, s3) */
+/** Префикс кондуктометров (+ s1, s2, s3, s4) — s4 = концентрат (с 2026-05-09) */
 #define MQTT_TOPIC_COND_PREFIX      "ro_plant/status/conductivity/"
+
+/**
+ * Префикс счётчиков электроэнергии KWS-306L (+ lp, hp).
+ * lp = низкого давления (НД-насос), hp = высокого давления (ВД-насос).
+ */
+#define MQTT_TOPIC_POWER_PREFIX     "ro_plant/status/power/"
 
 /** Расчетная телеметрия: filter_dp, stage1_feed, recovery, selectivity */
 #define MQTT_TOPIC_TELEMETRY        "ro_plant/status/telemetry"

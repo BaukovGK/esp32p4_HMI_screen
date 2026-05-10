@@ -164,6 +164,20 @@ void plant_data_set_doser(doser_state_t s, bool e)
 void plant_data_set_diagnostics(const diagnostics_t *d) { (void)d; }
 void plant_data_set_mqtt_status(bool c) { (void)c; }
 
+void plant_data_set_power_meter(int i, const power_meter_data_t *d)
+{ (void)i; (void)d; }
+
+power_meter_data_t plant_data_get_power_lp(void)
+{
+    power_meter_data_t z = { NAN, NAN, NAN, NAN, NAN, false };
+    return z;
+}
+power_meter_data_t plant_data_get_power_hp(void)
+{
+    power_meter_data_t z = { NAN, NAN, NAN, NAN, NAN, false };
+    return z;
+}
+
 /* NVS save stubs (no-op in preview) */
 void plant_data_save_settings_pressure(const settings_pressure_t *s)  { (void)s; }
 void plant_data_save_settings_doser(const settings_doser_t *s)        { (void)s; }

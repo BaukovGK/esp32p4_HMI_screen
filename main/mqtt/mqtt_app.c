@@ -51,6 +51,9 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         // Подписка на аварийные сообщения (QoS 1 для гарантии доставки)
         msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_ALARMS, 1);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_ALARMS);
+        // Подписка на availability контроллера (retained, QoS 1)
+        msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_AVAILABILITY, 1);
+        if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_AVAILABILITY);
         /* Публикация доступности HMI (retained) */
         msg_id = esp_mqtt_client_publish(s_client, MQTT_TOPIC_HMI_AVAILABILITY, "online", 0, 1, 1);
         if (msg_id < 0) ESP_LOGE(TAG, "Failed to publish availability");
