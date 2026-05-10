@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <title>RO HMI — Главная</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* ───── main screen specific ───── */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            grid-template-rows: 1fr;
+            gap: var(--gap-md);
+            padding: var(--gap-md);
+            height: 100%;
+        }
+
+        /* мнемосхема — слева, занимает всё */
+        .mnemo-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--gap-sm);  /* было gap-md, уменьшено для большего места под схему */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .mnemo-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--gap-sm);  /* было gap-md, уменьшено */
+        }
+        .mnemo-svg {
+            flex: 1;
+            width: 100%;
+        }
+
+        /* правая колонка — KPI + кнопки */
+        .right-col {
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap-md);
+            min-width: 0;
+        }
+
+        /* KPI grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--gap-sm);
+        }
+
+        /* кнопки управления */
+        .control-stack {
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap-sm);
+        }
+        .control-stack .btn { width: 100%; }
+        .control-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--gap-sm);
+        }
+
+        /* Mode badge на мнемосхеме */
+        .current-state {
+            font-size: var(--fs-lg);
+            font-weight: 600;
+        }
+
+        /* ─── SVG штрихи мнемосхемы ─── */
+        .mnemo-svg .pipe { stroke: var(--pipe); stroke-width: 4; fill: none; }
+        .mnemo-svg .pipe-active { stroke: var(--pipe-active); stroke-width: 5; fill: none; }
+        .mnemo-svg .pipe-recycle { stroke: var(--info); stroke-width: 3; stroke-dasharray: 6 4; fill: none; }
+
+        /* ─── Flow animation: «движущиеся капли» поверх активных труб ───
+         * Полупрозрачная dashed-линия поверх сплошной pipe-active. Анимация
+         * stroke-dashoffset создаёт иллюзию движения воды. Использовать только
+         * на активных трубах (pipe-active), не на recycle (там уже dashed). */
+        .mnemo-svg .pipe-flow {
+            stroke: rgba(255, 255, 255, 0.7);
+            stroke-width: 3;
+            stroke-dasharray: 6 10;
+            stroke-linecap: round;
+            fill: none;
+            pointer-events: none;
+            animation: flow-march 1.4s linear infinite;
+        }
+        .mnemo-svg .pipe-flow.reverse {
+            animation-name: flow-march-reverse;
+        }
+
+        /* dasharray = 6+10 = 16 → один цикл = смещение на 16 px */
+        @keyframes flow-march {
+            to { stroke-dashoffset: -16; }
+        }
+        @keyframes flow-march-reverse {
+            to { stroke-dashoffset: 16; }
+        }
+
+        /* Анимация ПРЯМО на pipe-recycle (он уже dashed, нет нужды в overlay) */
+        .mnemo-svg .pipe-recycle.flowing {
+            animation: recycle-march 1.6s linear infinite;
+        }
+        @keyframes recycle-march {
+            /* dasharray pipe-recycle = 6+4 = 10 px */
+            to { stroke-dashoffset: -10; }
+        }
+
+        /* В тёмной теме яркость капель ниже */
+        [data-theme="dark"] .mnemo-svg .pipe-flow {
+            stroke: rgba(255, 255, 255, 0.45);
+        }
+
+        /* Accessibility — уважаем prefers-reduced-motion */
+        @media (prefers-reduced-motion: reduce) {
+            .mnemo-svg .pipe-flow {
+                animation: none;
+                stroke-dashoffset: 0;
+            }
+        }
+
+        /* Junction — точка разветвления трубопровода (рецикл подключается
+         * к main pipe, не к блоку). Стандарт P&ID — small filled circle. */
+        .mnemo-svg .pipe-junction {
+            fill: var(--text-secondary);
+            stroke: none;
+        }
+        [data-theme="dark"] .mnemo-svg .pipe-junction {
+            fill: var(--text-secondary);
+        }
+        .mnemo-svg .tank {
+            fill: var(--bg-mute);
+            stroke: var(--tank-stroke);
+            stroke-width: 2;
+        }
+        /* legacy class — оставлен для обратной совместимости, не используется
+         * в новом представлении ёмкостей (см. tank-water-grad ниже). */
+        .mnemo-svg .tank-water { fill: var(--water); opacity: 0.7; }
+
+        /* ─── Ёмкости (расширенная графика) ────────────────────────────────
+         * Структура SVG-группы ёмкости:
+         *   1. <rect class="tank">              — корпус (rounded rect)
+         *   2. <g clip-path="…">                — обрезка по форме корпуса
+         *        <rect class="tank-water-grad"> — заливка водой
+         *        <path class="tank-wave-line">  — ripple на поверхности
+         *   3. <text class="tank-name">          — название ёмкости
+         *   4. <text class="tank-pct">           — % заполнения
+         *   5. <line class="tank-probe">         — стержень датчиков уровня
+         *   6. <g class="level-sw [.active]">    — поплавковый датчик на стержне
+         */
+        .mnemo-svg .tank-water-grad {
+            fill: url(#tankWaterGrad);
+            opacity: 0.85;
+        }
+        .mnemo-svg .tank-wave-line {
+            stroke: #ffffff;
+            stroke-width: 1.4;
+            fill: none;
+            opacity: 0.55;
+            stroke-linecap: round;
+            animation: tank-wave 5s ease-in-out infinite;
+            transform-box: fill-box;
+        }
+        [data-theme="dark"] .mnemo-svg .tank-wave-line { opacity: 0.4; }
+        @keyframes tank-wave {
+            0%, 100% { transform: translateX(0); }
+            50%      { transform: translateX(-10px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .mnemo-svg .tank-wave-line { animation: none; }
+        }
+        .mnemo-svg .tank-name {
+            fill: var(--text-primary);
+            font-size: 11px;
+            font-weight: 600;
+            font-family: inherit;
+            text-anchor: middle;
+        }
+        .mnemo-svg .tank-pct {
+            fill: var(--text-primary);
+            font-size: 12px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            font-variant-numeric: tabular-nums;
+            paint-order: stroke;
+            stroke: var(--bg-card);
+            stroke-width: 3;
+            stroke-linejoin: round;
+        }
+        /* Стержень-кронштейн с датчиками уровня (имитация погруженного зонда) */
+        .mnemo-svg .tank-probe {
+            stroke: var(--tank-stroke);
+            stroke-width: 1.5;
+            opacity: 0.55;
+            stroke-dasharray: 2 2;
+            stroke-linecap: round;
+        }
+        /* Поплавковый датчик уровня. Состояния:
+         *   default — сухой (◯, серый, контур)
+         *   .active — мокрый, контакт замкнут (●, зелёный)
+         *   .alarm  — авария (●, красный, пульсация)
+         */
+        .mnemo-svg .level-sw .sw-dot {
+            fill: var(--bg-card);
+            stroke: var(--text-muted);
+            stroke-width: 1.5;
+        }
+        .mnemo-svg .level-sw.active .sw-dot {
+            fill: var(--accent);
+            stroke: var(--accent);
+        }
+        .mnemo-svg .level-sw.alarm .sw-dot {
+            fill: var(--danger);
+            stroke: var(--danger);
+            animation: sc-pulse 1.5s ease-in-out infinite;
+        }
+        .mnemo-svg .level-sw .sw-tag {
+            fill: var(--text-secondary);
+            font-size: 8px;
+            font-weight: 700;
+            font-family: inherit;
+            letter-spacing: 0.3px;
+            text-anchor: start;
+        }
+        .mnemo-svg .level-sw.active .sw-tag { fill: var(--accent); }
+        .mnemo-svg .level-sw.alarm  .sw-tag { fill: var(--danger); }
+        .mnemo-svg .equipment-bg { fill: var(--bg-mute); stroke: var(--border-strong); stroke-width: 2; }
+        .mnemo-svg .equipment-active { fill: var(--accent-mute); stroke: var(--accent); stroke-width: 2; }
+        .mnemo-svg .label { fill: var(--text-primary); font-size: 12px; font-weight: 600; font-family: inherit; }
+        .mnemo-svg .label-sm { fill: var(--text-secondary); font-size: 10px; font-family: inherit; }
+        .mnemo-svg .arrow { fill: var(--pipe); }
+        .mnemo-svg .arrow-active { fill: var(--pipe-active); }
+
+        /* ─── ISA-5.1 sensor circles (P&ID-style instrumentation tags) ─── */
+        .mnemo-svg .sc-frame {
+            fill: var(--bg-card);
+            stroke: var(--accent);
+            stroke-width: 2;
+        }
+        .mnemo-svg .sc-divider {
+            stroke: var(--accent);
+            stroke-width: 1;
+            opacity: 0.6;
+        }
+        .mnemo-svg .sc-tag {
+            fill: var(--text-secondary);
+            font-size: 9px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            letter-spacing: 0.3px;
+        }
+        .mnemo-svg .sc-value {
+            fill: var(--text-primary);
+            font-size: 11px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: middle;
+            font-variant-numeric: tabular-nums;
+        }
+        /* leader line от прибора к точке врезки на трубе */
+        .mnemo-svg .sc-leader {
+            stroke: var(--accent);
+            stroke-width: 1;
+            fill: none;
+        }
+        /* tap point — маленький filled circle на трубе */
+        .mnemo-svg .sc-tap {
+            fill: var(--accent);
+            stroke: none;
+        }
+        /* группа sensor-group объединяет circle + leader + tap в одно
+         * единое целое для состояний — все элементы перекрашиваются вместе. */
+        .mnemo-svg .sensor-group.warn .sc-frame,
+        .mnemo-svg .sensor-group.warn .sc-divider,
+        .mnemo-svg .sensor-group.warn .sc-leader { stroke: var(--warning); }
+        .mnemo-svg .sensor-group.warn .sc-tap     { fill: var(--warning); }
+        .mnemo-svg .sensor-group.warn .sc-tag,
+        .mnemo-svg .sensor-group.warn .sc-value   { fill: var(--warning); }
+
+        .mnemo-svg .sensor-group.danger .sc-frame {
+            stroke: var(--danger);
+            animation: sc-pulse 1.5s ease-in-out infinite;
+        }
+        .mnemo-svg .sensor-group.danger .sc-divider,
+        .mnemo-svg .sensor-group.danger .sc-leader { stroke: var(--danger); }
+        .mnemo-svg .sensor-group.danger .sc-tap    { fill: var(--danger); }
+        .mnemo-svg .sensor-group.danger .sc-tag,
+        .mnemo-svg .sensor-group.danger .sc-value  { fill: var(--danger); }
+
+        @keyframes sc-pulse {
+            0%, 100% { stroke-width: 2; }
+            50% { stroke-width: 3.5; }
+        }
+        .mnemo-svg .sensor-group.offline .sc-frame {
+            stroke: var(--border-strong);
+            stroke-dasharray: 4 2;
+        }
+        .mnemo-svg .sensor-group.offline .sc-leader { stroke: var(--border-strong); stroke-dasharray: 4 2; }
+        .mnemo-svg .sensor-group.offline .sc-tap    { fill: var(--border-strong); }
+        .mnemo-svg .sensor-group.offline .sc-tag,
+        .mnemo-svg .sensor-group.offline .sc-value  { fill: var(--text-muted); }
+
+        /* ─── Насосы (P&ID-style centrifugal pump symbol — circle + impeller) ───
+         * Состояния:
+         *   .running  — крутится, зелёный градиент
+         *   .starting — пульсирующий жёлтый (запуск, медленное вращение)
+         *   .error    — пульсирующий красный (статичный ротор)
+         *   .off      — серый (статичный)
+         */
+        .mnemo-svg .pump-circle .pump-bg {
+            fill: var(--bg-card);
+            stroke: var(--accent);
+            stroke-width: 2;
+            transition: fill 0.3s, stroke 0.3s;
+        }
+        .mnemo-svg .pump-circle .pump-blade {
+            fill: var(--accent);
+            stroke: none;
+        }
+        .mnemo-svg .pump-circle .pump-hub {
+            fill: var(--bg-card);
+            stroke: var(--accent);
+            stroke-width: 1.5;
+        }
+        .mnemo-svg .pump-circle .pump-label {
+            fill: var(--text-primary);
+            font-size: 11px;
+            font-weight: 600;
+            font-family: inherit;
+            text-anchor: middle;
+        }
+
+        /* Группа ротора — анимация вращения через CSS.
+         * transform-box: fill-box даёт вращение вокруг центра bbox группы. */
+        .mnemo-svg .pump-circle .pump-rotor {
+            transform-box: fill-box;
+            transform-origin: center;
+        }
+
+        /* RUNNING — крутящийся импеллер с зелёным градиентом */
+        .mnemo-svg .pump-circle.running .pump-bg {
+            fill: url(#pumpGradRun);
+            stroke: var(--accent);
+        }
+        .mnemo-svg .pump-circle.running .pump-blade {
+            fill: #f4faf6;
+            opacity: 0.85;
+        }
+        .mnemo-svg .pump-circle.running .pump-rotor {
+            animation: pump-spin 1.5s linear infinite;
+        }
+
+        /* STARTING — жёлтый, медленное вращение, пульсирующий фон */
+        .mnemo-svg .pump-circle.starting .pump-bg {
+            fill: rgba(245, 158, 11, 0.18);
+            stroke: var(--warning);
+            animation: pump-pulse-warn 1.2s ease-in-out infinite;
+        }
+        .mnemo-svg .pump-circle.starting .pump-blade {
+            fill: var(--warning);
+        }
+        .mnemo-svg .pump-circle.starting .pump-hub {
+            stroke: var(--warning);
+        }
+        .mnemo-svg .pump-circle.starting .pump-rotor {
+            animation: pump-spin 3s linear infinite;
+        }
+
+        /* ERROR — красный, пульсирующий, ротор не вращается */
+        .mnemo-svg .pump-circle.error .pump-bg {
+            fill: rgba(220, 53, 69, 0.18);
+            stroke: var(--danger);
+            animation: pump-pulse-err 1s ease-in-out infinite;
+        }
+        .mnemo-svg .pump-circle.error .pump-blade {
+            fill: var(--danger);
+        }
+        .mnemo-svg .pump-circle.error .pump-hub {
+            stroke: var(--danger);
+        }
+
+        /* OFF — серый, статичный */
+        .mnemo-svg .pump-circle.off .pump-bg {
+            fill: var(--bg-mute);
+            stroke: var(--border-strong);
+        }
+        .mnemo-svg .pump-circle.off .pump-blade {
+            fill: var(--text-muted);
+        }
+        .mnemo-svg .pump-circle.off .pump-hub {
+            stroke: var(--text-muted);
+        }
+
+        @keyframes pump-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+        @keyframes pump-pulse-warn {
+            0%, 100% { stroke-width: 2; }
+            50%      { stroke-width: 3.5; }
+        }
+        @keyframes pump-pulse-err {
+            0%, 100% { stroke-width: 2; }
+            50%      { stroke-width: 4; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .mnemo-svg .pump-circle .pump-rotor { animation: none; }
+            .mnemo-svg .pump-circle .pump-bg    { animation: none; }
+        }
+
+        /* ─── Кликабельное оборудование (фильтр, насосы, мембраны) ─────────
+         * Эти элементы открывают подробный модал по клику. Курсор-указатель
+         * + лёгкий highlight на hover делает affordance очевидным. */
+        .mnemo-svg .equipment-clickable {
+            cursor: pointer;
+        }
+        .mnemo-svg .equipment-clickable:hover .filter-diamond,
+        .mnemo-svg .equipment-clickable:hover .equipment-active,
+        .mnemo-svg .equipment-clickable:hover .equipment-bg,
+        .mnemo-svg .equipment-clickable:hover .pump-bg {
+            filter: brightness(1.08) drop-shadow(0 0 4px var(--accent));
+        }
+        .mnemo-svg .equipment-clickable:focus { outline: none; }
+        .mnemo-svg .equipment-clickable:focus-visible .filter-diamond,
+        .mnemo-svg .equipment-clickable:focus-visible .equipment-active,
+        .mnemo-svg .equipment-clickable:focus-visible .pump-bg {
+            stroke: var(--accent-hover);
+            stroke-width: 3;
+        }
+
+        /* ─── Фильтр (ромб с буквой "Ф" — упрощённый ISA-символ фильтра) ─── */
+        .mnemo-svg .filter-diamond {
+            fill: var(--bg-mute);
+            stroke: var(--border-strong);
+            stroke-width: 2;
+        }
+        .mnemo-svg .filter-letter {
+            fill: var(--text-primary);
+            font-size: 14px;
+            font-weight: 700;
+            font-family: inherit;
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+    </style>
+</head>
+<body>
+
+<div class="screen">
+
+    <!-- ───── status bar ───── -->
+    <div class="statusbar">
+        <span class="sb-time">14:32:05</span>
+        <span class="sb-message" data-i18n="sb.system_running">Установка в работе</span>
+        <div class="sb-controls">
+            <span class="sb-link sb-conn"><span class="dot"></span><span data-i18n="sb.online">Связь с хабом</span></span>
+            <button class="sb-btn" data-action="toggle-theme">☾</button>
+            <button class="sb-btn" data-action="toggle-lang">RU</button>
+        </div>
+    </div>
+
+    <!-- ───── content ───── -->
+    <div class="content">
+        <div class="main-grid">
+
+            <!-- ───── мнемосхема ───── -->
+            <div class="mnemo-panel">
+                <div class="mnemo-header">
+                    <h2 class="card-title" data-i18n="main.title">Технологическая схема</h2>
+                    <div class="current-state">
+                        <span class="badge badge-ok"><span data-i18n="mode.auto">Авто</span> · RUNNING</span>
+                    </div>
+                </div>
+
+                <!-- SVG мнемосхема установки. Sensor circles — стандарт ISA-5.1
+                     P&ID: круг с тегом наверху (P1, Q1, σ1...) и значением внизу.
+                     Каждый прибор связан leader-line с tap-point на трубопроводе.
+                     Направление потока показано flow-animation (бегущие капли),
+                     стрелки-маркеры не используются. -->
+                <svg class="mnemo-svg" viewBox="0 30 900 530" preserveAspectRatio="xMidYMin meet">
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         SVG defs:
+                          • pumpGradRun  — радиальный градиент работающего насоса
+                          • tankWaterGrad — вертикальный градиент воды (светлее
+                            у поверхности, темнее у дна)
+                          • clip-feed-tank / -inter-tank / -product-tank — обрезки
+                            формы каждой ёмкости для воды и волны
+                         ════════════════════════════════════════════════════════════ -->
+                    <defs>
+                        <radialGradient id="pumpGradRun" cx="50%" cy="50%" r="50%">
+                            <stop offset="0%"  stop-color="#7fc89e"/>
+                            <stop offset="60%" stop-color="#3fa66a"/>
+                            <stop offset="100%" stop-color="#2d8659"/>
+                        </radialGradient>
+                        <linearGradient id="tankWaterGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%"   stop-color="#7cc8f5"/>
+                            <stop offset="100%" stop-color="#1f7cb8"/>
+                        </linearGradient>
+                        <clipPath id="clip-feed-tank">
+                            <rect x="20" y="180" width="80" height="80" rx="8"/>
+                        </clipPath>
+                        <clipPath id="clip-inter-tank">
+                            <rect x="570" y="320" width="160" height="80" rx="8"/>
+                        </clipPath>
+                        <clipPath id="clip-product-tank">
+                            <rect x="60" y="320" width="80" height="80" rx="8"/>
+                        </clipPath>
+                    </defs>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         КОМПАКТНЫЙ LAYOUT 900×560:
+                         Row 1 (top): исходная (left, vertical), оборудование 1ст (Y=180..240)
+                         Row 2 (middle): чистая (left, vertical), оборудование 2ст (Y=320..380)
+                         Pipe row 1: Y=210, pipe row 2: Y=350
+                         Sensors above row 1: Y=130..170, sensors below row 2: Y=400..440
+                         Recycle 1ст: петля Y=140 над row 1
+                         Recycle 2ст: петля Y=410 под row 2
+                         ════════════════════════════════════════════════════════════ -->
+
+                    <!-- ═══ Исходная ёмкость (feed) ═══════════════════════════════
+                         Геометрия 80×80 на (20, 180). Уровень воды ~62% (y=210→260).
+                         Один поплавковый датчик DI1 (низкоуровневый, активен).
+                         ═══════════════════════════════════════════════════════════ -->
+                    <g class="tank-group">
+                        <rect class="tank" x="20" y="180" width="80" height="80" rx="8"/>
+                        <g clip-path="url(#clip-feed-tank)">
+                            <rect class="tank-water-grad" x="20" y="210" width="80" height="50"/>
+                            <path class="tank-wave-line"
+                                  d="M14,210 Q26,207 38,210 T62,210 T86,210 T110,210"/>
+                        </g>
+                        <text class="tank-name" x="60" y="198"
+                              data-i18n="main.feed_tank">Исходная</text>
+                        <text class="tank-pct"  x="60" y="237">62%</text>
+                        <line class="tank-probe" x1="36" y1="186" x2="36" y2="254"/>
+                        <g class="level-sw active" transform="translate(36, 245)">
+                            <circle class="sw-dot" cx="0" cy="0" r="3.5"/>
+                            <text class="sw-tag" x="6" y="3">DI1</text>
+                        </g>
+                    </g>
+
+                    <!-- труба от исходной к преднагнетанию (горизонтально) -->
+                    <line class="pipe-active" x1="100" y1="210" x2="152" y2="210"/>
+                    <line class="pipe-flow" x1="100" y1="210" x2="152" y2="210"/>
+
+                    <!-- ===== Преднагнетательный насос (centrifugal pump symbol) ===== -->
+                    <g class="pump-circle running equipment-clickable" data-equipment="pump-pre" transform="translate(178,210)">
+                        <circle class="pump-bg" r="26"/>
+                        <g class="pump-rotor">
+                            <path class="pump-blade" d="M0,0 L18,-7 A19,19 0 0,1 18,7 Z"/>
+                            <path class="pump-blade" d="M0,0 L7,18 A19,19 0 0,1 -7,18 Z"/>
+                            <path class="pump-blade" d="M0,0 L-18,7 A19,19 0 0,1 -18,-7 Z"/>
+                            <path class="pump-blade" d="M0,0 L-7,-18 A19,19 0 0,1 7,-18 Z"/>
+                            <circle class="pump-hub" r="4"/>
+                        </g>
+                        <text class="pump-label" y="44" data-i18n="main.pump_pre">Преднагн.</text>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         ДОЗАТОР — реагент-антискалант впрыскивается ПОСЛЕ фильтра
+                         (если впрыснуть до фильтра, мехочистка задержит хлопья).
+                         Точка врезки (435, 210) на pipe-active filter→1ст; Дозатор
+                         остаётся на левом краю под Преднагн (свободное место).
+                         Линия: Дозатор right → вправо вдоль y=285 → вверх к pipe.
+                         ════════════════════════════════════════════════════════════ -->
+                    <rect class="equipment-bg" x="140" y="265" width="76" height="40" rx="6"/>
+                    <text class="label" x="178" y="285" text-anchor="middle" data-i18n="main.doser">Дозатор</text>
+                    <text class="label-sm" x="178" y="298" text-anchor="middle">RO5 · OFF</text>
+                    <!-- Connecting pipe от дозатора до точки врезки (435, 210) -->
+                    <line class="pipe" x1="216" y1="285" x2="435" y2="285"/>
+                    <line class="pipe" x1="435" y1="285" x2="435" y2="210"/>
+                    <!-- Junction на pipe-active фильтр→1ст (точка впрыска реагента) -->
+                    <circle class="pipe-junction" cx="435" cy="210" r="4"/>
+
+                    <!-- труба от преднагн → фильтр, с tap-points P1 + Q1
+                         (фильтр уменьшен → труба длиннее, P1/Q1 разнесены) -->
+                    <line class="pipe-active" x1="204" y1="210" x2="310" y2="210"/>
+                    <line class="pipe-flow" x1="204" y1="210" x2="310" y2="210"/>
+
+                    <!-- ═══ P1 + Q1 на трубе после преднагнетания (Q1 сдвинут вправо
+                         после уменьшения фильтра — теперь между датчиками комфортный
+                         зазор без визуального наложения кругов) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="235" y1="210" x2="235" y2="158"/>
+                        <circle class="sc-tap" cx="235" cy="210" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(235,135)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">P1</text>
+                            <text class="sc-value" y="11">3.2</text>
+                        </g>
+                    </g>
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="290" y1="210" x2="290" y2="158"/>
+                        <circle class="sc-tap" cx="290" cy="210" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(290,135)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">Q1</text>
+                            <text class="sc-value" y="11">2.5</text>
+                        </g>
+                    </g>
+
+                    <!-- ===== Фильтр мехочистки (ромб с буквой "Ф", уменьшен 2×) =====
+                         Ромб 40×40 с центром (330, 210). Вершины: top (330,190),
+                         right (350,210), bottom (330,230), left (310,210).
+                         Левая и правая точки совпадают с концами труб → бесшовно.
+                         Уменьшение освободило место для P1/Q1 датчиков на трубе.
+                         Кликабелен — открывает модал с ΔP и наработкой картриджа. -->
+                    <g class="equipment-clickable" data-equipment="filter">
+                        <polygon class="filter-diamond" points="330,190 350,210 330,230 310,210"/>
+                        <text class="filter-letter" x="330" y="210">Ф</text>
+                        <text class="label-sm" x="330" y="248" text-anchor="middle" data-i18n="main.filter">Фильтр</text>
+                    </g>
+
+                    <!-- труба фильтр → насос 1ст с tap-point P2 (фильтр уменьшен:
+                         труба теперь начинается с x=350, не x=370) -->
+                    <line class="pipe-active" x1="350" y1="210" x2="452" y2="210"/>
+                    <line class="pipe-flow" x1="350" y1="210" x2="452" y2="210"/>
+
+                    <!-- ═══ P2 — после фильтра (сдвинут к началу трубы, чтобы освободить
+                         x=420 для junction рецикла 1ст ниже) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="385" y1="210" x2="385" y2="158"/>
+                        <circle class="sc-tap" cx="385" cy="210" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(385,135)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">P2</text>
+                            <text class="sc-value" y="11">2.9</text>
+                        </g>
+                    </g>
+
+                    <!-- ===== Насос 1-й ступени (centrifugal pump symbol) ===== -->
+                    <g class="pump-circle running equipment-clickable" data-equipment="pump-st1" transform="translate(478,210)">
+                        <circle class="pump-bg" r="26"/>
+                        <g class="pump-rotor">
+                            <path class="pump-blade" d="M0,0 L18,-7 A19,19 0 0,1 18,7 Z"/>
+                            <path class="pump-blade" d="M0,0 L7,18 A19,19 0 0,1 -7,18 Z"/>
+                            <path class="pump-blade" d="M0,0 L-18,7 A19,19 0 0,1 -18,-7 Z"/>
+                            <path class="pump-blade" d="M0,0 L-7,-18 A19,19 0 0,1 7,-18 Z"/>
+                            <circle class="pump-hub" r="4"/>
+                        </g>
+                        <text class="pump-label" y="44" data-i18n="main.pump_st1">1-я ст.</text>
+                    </g>
+
+                    <!-- труба насос 1ст → мембрана 1 с tap-point P3 -->
+                    <line class="pipe-active" x1="504" y1="210" x2="590" y2="210"/>
+                    <line class="pipe-flow" x1="504" y1="210" x2="590" y2="210"/>
+
+                    <!-- ═══ P3 — давление 1-й ступени ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="553" y1="210" x2="553" y2="158"/>
+                        <circle class="sc-tap" cx="553" cy="210" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(553,135)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">P3</text>
+                            <text class="sc-value" y="11">26.8</text>
+                        </g>
+                    </g>
+
+                    <!-- ===== Мембрана 1-й ступени ===== -->
+                    <g class="equipment-clickable" data-equipment="membrane-1">
+                        <rect class="equipment-active" x="590" y="180" width="120" height="60" rx="6"/>
+                        <text class="label" x="650" y="205" text-anchor="middle" data-i18n="main.membrane1">Мембрана 1ст.</text>
+                        <line x1="590" y1="225" x2="710" y2="225" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         РЕЦИКЛ 1-й СТУПЕНИ — выход концентрата СВЕРХУ мембраны 1
+                         (отдельная труба от рецикла, не общая с дренажом):
+                         • НАЧАЛО: на top-edge мембраны 1 в (650, 180)
+                         • КОНЕЦ: junction на pipe-active (фильтр→насос 1ст) в (420, 210)
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe-recycle flowing" x1="650" y1="180" x2="650" y2="100"/>
+                    <line class="pipe-recycle flowing" x1="650" y1="100" x2="420" y2="100"/>
+                    <line class="pipe-recycle flowing" x1="420" y1="100" x2="420" y2="210"/>
+                    <circle class="pipe-junction" cx="420" cy="210" r="4"/>
+
+                    <!-- ═══ Q2 — расход рецикла 1ст ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="535" y1="100" x2="535" y2="78"/>
+                        <circle class="sc-tap" cx="535" cy="100" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(535,55)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">Q2</text>
+                            <text class="sc-value" y="11">0.8</text>
+                        </g>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         ДРЕНАЖ — отдельная труба от right-edge мембраны 1.
+                         Серая (вентиль закрыт в обычном режиме), концентрат уходит
+                         на дренаж только при ручном открытии.
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe" x1="710" y1="210" x2="790" y2="210"/>
+                    <text class="label-sm" x="793" y="214">дренаж</text>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         СВЯЗЬ row 1 → row 2: пермеат от мембраны 1 вниз к промежуточной
+                         Y=240..320 (вертикально). σ2 sensor справа от трубы.
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe-active" x1="650" y1="240" x2="650" y2="320"/>
+                    <line class="pipe-flow" x1="650" y1="240" x2="650" y2="320"/>
+
+                    <!-- ═══ σ2 — проводимость пермеата 1ст ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="650" y1="280" x2="710" y2="280"/>
+                        <circle class="sc-tap" cx="650" cy="280" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(735,280)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">σ2</text>
+                            <text class="sc-value" y="11">18.4</text>
+                        </g>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         ROW 2 (нижний ряд): Промеж. → 2-я ст. → Мембрана 2 → Чистая
+                         Y=320..380 для оборудования, pipe Y=350, поток справа налево
+                         ════════════════════════════════════════════════════════════ -->
+
+                    <!-- ═══ Промежуточная ёмкость ═════════════════════════════════
+                         Геометрия 160×80 на (570, 320). Уровень ~69% (y=345→400).
+                         Два поплавка: DI3 — высокоуровневый (сухой), DI2 — низко-
+                         уровневый (мокрый). Стержень-зонд по левому борту.
+                         ═══════════════════════════════════════════════════════════ -->
+                    <g class="tank-group">
+                        <rect class="tank" x="570" y="320" width="160" height="80" rx="8"/>
+                        <g clip-path="url(#clip-inter-tank)">
+                            <rect class="tank-water-grad" x="570" y="345" width="160" height="55"/>
+                            <path class="tank-wave-line"
+                                  d="M564,345 Q576,342 588,345 T612,345 T636,345 T660,345 T684,345 T708,345 T736,345"/>
+                        </g>
+                        <text class="tank-name" x="650" y="335"
+                              data-i18n="main.inter_tank">Промеж.</text>
+                        <text class="tank-pct"  x="650" y="375">69%</text>
+                        <line class="tank-probe" x1="586" y1="326" x2="586" y2="394"/>
+                        <!-- DI3 — высокий уровень: сухой → ёмкость не переполнена -->
+                        <g class="level-sw" transform="translate(586, 332)">
+                            <circle class="sw-dot" cx="0" cy="0" r="3.5"/>
+                            <text class="sw-tag" x="6" y="3">DI3</text>
+                        </g>
+                        <!-- DI2 — низкий уровень: мокрый → есть вода для подачи -->
+                        <g class="level-sw active" transform="translate(586, 388)">
+                            <circle class="sw-dot" cx="0" cy="0" r="3.5"/>
+                            <text class="sw-tag" x="6" y="3">DI2</text>
+                        </g>
+                    </g>
+
+                    <!-- труба промеж → насос 2 (поток справа налево, flow.reverse) -->
+                    <line class="pipe-active" x1="570" y1="350" x2="486" y2="350"/>
+                    <line class="pipe-flow reverse" x1="486" y1="350" x2="570" y2="350"/>
+
+                    <!-- ===== Насос 2-й ступени (centrifugal pump symbol) ===== -->
+                    <g class="pump-circle running equipment-clickable" data-equipment="pump-st2" transform="translate(460,350)">
+                        <circle class="pump-bg" r="26"/>
+                        <g class="pump-rotor">
+                            <path class="pump-blade" d="M0,0 L18,-7 A19,19 0 0,1 18,7 Z"/>
+                            <path class="pump-blade" d="M0,0 L7,18 A19,19 0 0,1 -7,18 Z"/>
+                            <path class="pump-blade" d="M0,0 L-18,7 A19,19 0 0,1 -18,-7 Z"/>
+                            <path class="pump-blade" d="M0,0 L-7,-18 A19,19 0 0,1 7,-18 Z"/>
+                            <circle class="pump-hub" r="4"/>
+                        </g>
+                        <text class="pump-label" y="44" data-i18n="main.pump_st2">2-я ст.</text>
+                    </g>
+
+                    <!-- труба насос 2 → мембрана 2, tap-point P4 (flow.reverse) -->
+                    <line class="pipe-active" x1="434" y1="350" x2="340" y2="350"/>
+                    <line class="pipe-flow reverse" x1="340" y1="350" x2="434" y2="350"/>
+
+                    <!-- ═══ P4 — давление 2-й ступени (под трубой) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="380" y1="350" x2="380" y2="402"/>
+                        <circle class="sc-tap" cx="380" cy="350" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(380,425)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">P4</text>
+                            <text class="sc-value" y="11">6.5</text>
+                        </g>
+                    </g>
+
+                    <!-- ===== Мембрана 2-й ступени ===== -->
+                    <g class="equipment-clickable" data-equipment="membrane-2">
+                        <rect class="equipment-active" x="220" y="320" width="120" height="60" rx="6"/>
+                        <text class="label" x="280" y="345" text-anchor="middle" data-i18n="main.membrane2">Мембрана 2ст.</text>
+                        <line x1="220" y1="365" x2="340" y2="365" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         РЕЦИКЛ 2-й СТУПЕНИ — концентрат с bottom-center мембраны 2.
+                         Симметричен рециклу 1 (который выходит с top-center мембр. 1):
+                         • НАЧАЛО: bottom-edge мембраны 2 в (280, 380) — прямое
+                           соединение с блоком. Дренажа на 2-й ступени нет,
+                           поэтому весь концентрат → рецикл (без pipe-active stub).
+                         • КОНЕЦ: junction на pipe-active (промеж→насос 2) в (550, 350)
+                           — ближе к промеж-танку, чтобы концентрат разбавлялся.
+                         • Горизонталь y=455 — ниже P4 sensor (его круг до y=447).
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe-recycle flowing" x1="280" y1="380" x2="280" y2="455"/>
+                    <line class="pipe-recycle flowing" x1="280" y1="455" x2="550" y2="455"/>
+                    <line class="pipe-recycle flowing" x1="550" y1="455" x2="550" y2="350"/>
+                    <circle class="pipe-junction" cx="550" cy="350" r="4"/>
+
+                    <!-- ═══ Q4 — расход рецикла 2ст (под петлёй) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="415" y1="455" x2="415" y2="483"/>
+                        <circle class="sc-tap" cx="415" cy="455" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(415,505)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">Q4</text>
+                            <text class="sc-value" y="11">0.5</text>
+                        </g>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         ВЫХОД: Мембрана 2 → Чистая ёмкость (горизонтально влево).
+                         σ3 и Q3 sensors ОБА снизу от трубы (избегаем коллизии Q3
+                         с дозатором, который на y=265..305 над трубой row 2).
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe-active" x1="220" y1="350" x2="140" y2="350"/>
+                    <line class="pipe-flow reverse" x1="140" y1="350" x2="220" y2="350"/>
+
+                    <!-- ═══ σ3 — проводимость товарного пермеата (снизу-слева) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="155" y1="350" x2="155" y2="402"/>
+                        <circle class="sc-tap" cx="155" cy="350" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(155,425)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">σ3</text>
+                            <text class="sc-value" y="11">1.2</text>
+                        </g>
+                    </g>
+
+                    <!-- ═══ Q3 — расход товарного пермеата (снизу-справа от σ3) ═══ -->
+                    <g class="sensor-group">
+                        <line class="sc-leader" x1="210" y1="350" x2="210" y2="402"/>
+                        <circle class="sc-tap" cx="210" cy="350" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(210,425)">
+                            <circle class="sc-frame" r="22"/>
+                            <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
+                            <text class="sc-tag" y="-10">Q3</text>
+                            <text class="sc-value" y="11">1.4</text>
+                        </g>
+                    </g>
+
+                    <!-- ═══ Чистая (продуктовая) ёмкость ══════════════════════════
+                         Геометрия 80×80 на (60, 320). Уровень ~62% (y=350→400).
+                         Один поплавок DI4 (контроль наполнения, сухой —
+                         в текущем состоянии резервуар не заполнен до отметки).
+                         ═══════════════════════════════════════════════════════════ -->
+                    <g class="tank-group">
+                        <rect class="tank" x="60" y="320" width="80" height="80" rx="8"/>
+                        <g clip-path="url(#clip-product-tank)">
+                            <rect class="tank-water-grad" x="60" y="350" width="80" height="50"/>
+                            <path class="tank-wave-line"
+                                  d="M54,350 Q66,347 78,350 T102,350 T126,350 T150,350"/>
+                        </g>
+                        <text class="tank-name" x="100" y="340"
+                              data-i18n="main.product_tank">Чистая</text>
+                        <text class="tank-pct"  x="100" y="377">62%</text>
+                        <line class="tank-probe" x1="76" y1="326" x2="76" y2="394"/>
+                        <g class="level-sw" transform="translate(76, 380)">
+                            <circle class="sw-dot" cx="0" cy="0" r="3.5"/>
+                            <text class="sw-tag" x="6" y="3">DI4</text>
+                        </g>
+                    </g>
+
+                    <!-- ════════════════════════════════════════════════════════════
+                         ЛЕГЕНДА (правый верхний угол свободного пространства)
+                         ════════════════════════════════════════════════════════════ -->
+                    <g transform="translate(750, 410)">
+                        <text class="label" x="0" y="0" font-weight="600">Условные</text>
+                        <text class="label" x="0" y="14" font-weight="600">обозначения</text>
+
+                        <!-- Активный поток (со встроенной flow-анимацией) -->
+                        <line class="pipe-active" x1="0" y1="34" x2="36" y2="34"/>
+                        <line class="pipe-flow" x1="0" y1="34" x2="36" y2="34"/>
+                        <text class="label-sm" x="48" y="38">Активный</text>
+                        <text class="label-sm" x="48" y="50">поток</text>
+
+                        <line class="pipe" x1="0" y1="68" x2="36" y2="68"/>
+                        <text class="label-sm" x="48" y="72">Не активен</text>
+
+                        <line class="pipe-recycle flowing" x1="0" y1="92" x2="36" y2="92"/>
+                        <text class="label-sm" x="48" y="96">Рецикл</text>
+
+                        <!-- Junction (точка разветвления трубы) -->
+                        <line class="pipe-active" x1="0" y1="120" x2="36" y2="120"/>
+                        <circle class="pipe-junction" cx="18" cy="120" r="4"/>
+                        <text class="label-sm" x="48" y="124">Узел трубы</text>
+
+                        <!-- Прибор (sensor circle) -->
+                        <line class="pipe-active" x1="-10" y1="150" x2="40" y2="150"/>
+                        <g class="sensor-group">
+                            <line class="sc-leader" x1="20" y1="150" x2="20" y2="168"/>
+                            <circle class="sc-tap" cx="20" cy="150" r="3"/>
+                            <g class="sensor-circle" transform="translate(20,184)">
+                                <circle class="sc-frame" r="14"/>
+                                <line class="sc-divider" x1="-14" y1="0" x2="14" y2="0"/>
+                                <text class="sc-tag" y="-5" style="font-size:7px">тег</text>
+                                <text class="sc-value" y="6" style="font-size:8px">99.9</text>
+                            </g>
+                        </g>
+                        <text class="label-sm" x="48" y="154">Прибор</text>
+                    </g>
+
+                </svg>
+            </div>
+
+            <!-- ───── правая колонка ───── -->
+            <div class="right-col">
+
+                <!-- KPI grid (живые параметры) -->
+                <div class="card" style="padding: var(--gap-md);">
+                    <div class="kpi-grid">
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.st1_pressure">Давление 1ст.</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="26.8" data-mock-decimals="1" data-mock-noise="0.03">26.8</span><span class="kpi-unit">bar</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.st2_pressure">Давление 2ст.</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="6.5" data-mock-decimals="1" data-mock-noise="0.05">6.5</span><span class="kpi-unit">bar</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.temp">Температура</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="22.3" data-mock-decimals="1" data-mock-noise="0.02">22.3</span><span class="kpi-unit">°C</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.product_flow">Расход пермеат</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="1.42" data-mock-decimals="2" data-mock-noise="0.05">1.42</span><span class="kpi-unit">m³/h</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.perm2_cond">σ пермеат 2ст.</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="1.2" data-mock-decimals="1" data-mock-noise="0.1">1.2</span><span class="kpi-unit">µS</span></span>
+                        </div>
+                        <div class="kpi">
+                            <span class="kpi-label" data-i18n="p.feed_cond">σ исходная</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="324" data-mock-decimals="0" data-mock-noise="0.05">324</span><span class="kpi-unit">µS</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.lp_power">НД мощн.</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="850" data-mock-decimals="0" data-mock-noise="0.03">850</span><span class="kpi-unit">W</span></span>
+                        </div>
+                        <div class="kpi ok">
+                            <span class="kpi-label" data-i18n="p.hp_power">ВД мощн.</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="2200" data-mock-decimals="0" data-mock-noise="0.02">2200</span><span class="kpi-unit">W</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Кнопки управления -->
+                <!-- Дизайн отражает топ-3 сценария Q1.3 (UI_SPEC §7):
+                     [Пуск AUTO] и [Ручной режим] — две LARGE primary кнопки,
+                     остальные — secondary / medium. -->
+                <div class="card" style="padding: 7px var(--gap-md);">
+                    <h3 class="card-title">Управление</h3>
+                    <div class="control-stack">
+                        <button class="btn btn-success btn-lg" data-confirm="confirm.start_auto" data-action="start_auto" data-i18n="main.start_auto">Пуск AUTO</button>
+                        <button class="btn" data-confirm="confirm.manual" data-action="manual" data-i18n="main.manual">Ручной режим</button>
+                        <div class="control-row">
+                            <button class="btn btn-danger" data-action="stop" data-i18n="main.stop">Стоп</button>
+                            <button class="btn btn-secondary" data-action="washing" data-href="washing.html" data-i18n="main.washing">Промывка</button>
+                        </div>
+                        <button class="btn btn-secondary" data-action="silence" data-i18n="main.silence">Заглушить алярмы</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ───── tab bar ───── -->
+    <div class="tabbar">
+        <a class="tab active" href="index.html">
+            <span class="tab-icon">⌂</span>
+            <span class="tab-label" data-i18n="tab.main">Главная</span>
+        </a>
+        <a class="tab" href="washing.html">
+            <span class="tab-icon">⟲</span>
+            <span class="tab-label" data-i18n="tab.washing">Промывка</span>
+        </a>
+        <a class="tab" href="settings.html">
+            <span class="tab-icon">⚙</span>
+            <span class="tab-label" data-i18n="tab.settings">Настройки</span>
+        </a>
+        <a class="tab" href="debug.html">
+            <span class="tab-icon">⚒</span>
+            <span class="tab-label" data-i18n="tab.debug">Отладка</span>
+        </a>
+    </div>
+
+</div>
+
+<!-- ───── confirm modal ───── -->
+<div id="confirm-modal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-title" data-i18n="confirm.title">Подтвердите действие</div>
+        <div class="modal-text"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" data-modal="no" data-i18n="confirm.no">Отмена</button>
+            <button class="btn" data-modal="yes" data-i18n="confirm.yes">Да</button>
+        </div>
+    </div>
+</div>
+
+<!-- ───── sensor detail modal ───── -->
+<!-- Открывается по клику на любой sensor-circle на мнемосхеме.
+     Содержимое генерируется JS (showSensorDetail) — заполняется
+     по тэгу прибора (P1, Q3, σ2 ...) из словаря sensorMeta. -->
+<div id="sensor-modal" class="modal-overlay">
+    <div class="modal sensor-modal">
+        <!-- содержимое подставляется через JS innerHTML -->
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
