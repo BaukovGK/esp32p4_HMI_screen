@@ -224,7 +224,7 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
         lv_obj_set_style_text_font(lbl, UI_FONT_XS, 0);
         lv_obj_align(lbl, LV_ALIGN_CENTER, 0, -6);
         lv_obj_t *lbl2 = lv_label_create(doser);
-        lv_label_set_text(lbl2, "RO5 · OFF");
+        lv_label_set_text(lbl2, "RO5 OFF");   /* '·' middle-dot отсутствует в Montserrat → используем пробел */
         lv_obj_set_style_text_color(lbl2, ui_token_text_secondary(), 0);
         lv_obj_set_style_text_font(lbl2, UI_FONT_XS, 0);
         lv_obj_align(lbl2, LV_ALIGN_CENTER, 0, 6);

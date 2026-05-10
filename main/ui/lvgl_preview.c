@@ -47,8 +47,11 @@ void plant_data_init(void)
     s_preview_data.state    = PLANT_STATE_AUTO;
     s_preview_data.auto_sub = AUTO_SUB_RUNNING;
 
-    /* Digital I/O: tanks half-full, 3 pumps running */
-    s_preview_data.di      = 0x33;  /* source low+high, interm low+high */
+    /* Digital I/O: tanks с водой + все 3 насоса работают.
+     * DI_SOURCE_LOW (b0) + DI_INTERM_LOW (b2) + DI_PUMP1..3_RUN (b4..b6).
+     * Биты b1 (DI_SOURCE_HIGH), b3 (DI_INTERM_HIGH), b7 (DI_PERMEATE_HIGH)
+     * специально 0 — visualizes "tank half-full" + "product not topped". */
+    s_preview_data.di      = 0x75;  /* 0111 0101 */
     s_preview_data.do_bits = 0x07;  /* pump1 + pump2 + pump3 */
 
     /* Pressure P1..P4 (bar) */

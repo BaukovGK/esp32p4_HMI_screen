@@ -53,11 +53,12 @@ lv_obj_t *ui_pipe_segment(lv_obj_t *parent,
     lv_obj_set_style_line_color(line, pipe_color(kind), 0);
     lv_obj_set_style_line_rounded(line, true, 0);
 
-    /* Для recycle-трубы имитируем dashed-pattern через opacity 75%
-     * (полноценный stroke-dasharray в lv_line отсутствует — в фазе 7
-     * можно нарисовать через lv_canvas или последовательность сегментов). */
+    /* Recycle — dashed-линия через нативную LVGL поддержку (line_dash_*).
+     * dash 8px / gap 6px ≈ proto stroke-dasharray "6 4". */
     if (kind == UI_PIPE_RECYCLE) {
-        lv_obj_set_style_line_opa(line, (LV_OPA_COVER * 75) / 100, 0);
+        lv_obj_set_style_line_dash_width(line, 10, 0);
+        lv_obj_set_style_line_dash_gap(line, 6, 0);
+        lv_obj_set_style_line_rounded(line, false, 0);  /* острые концы dash'ей */
     }
 
     /* Сохранить points указатель для авто-освобождения через event_cb. */
