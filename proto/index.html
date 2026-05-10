@@ -261,10 +261,6 @@
                 <div class="card" style="padding: var(--gap-md);">
                     <div class="kpi-grid">
                         <div class="kpi ok">
-                            <span class="kpi-label" data-i18n="p.feed_pressure">Давление преднагн.</span>
-                            <span><span class="kpi-value" data-mock data-mock-base="3.2" data-mock-decimals="1" data-mock-noise="0.05">3.2</span><span class="kpi-unit">bar</span></span>
-                        </div>
-                        <div class="kpi ok">
                             <span class="kpi-label" data-i18n="p.st1_pressure">Давление 1ст.</span>
                             <span><span class="kpi-value" data-mock data-mock-base="26.8" data-mock-decimals="1" data-mock-noise="0.03">26.8</span><span class="kpi-unit">bar</span></span>
                         </div>
@@ -284,6 +280,10 @@
                             <span class="kpi-label" data-i18n="p.perm2_cond">σ пермеат 2ст.</span>
                             <span><span class="kpi-value" data-mock data-mock-base="1.2" data-mock-decimals="1" data-mock-noise="0.1">1.2</span><span class="kpi-unit">µS</span></span>
                         </div>
+                        <div class="kpi">
+                            <span class="kpi-label" data-i18n="p.feed_cond">σ исходная</span>
+                            <span><span class="kpi-value" data-mock data-mock-base="324" data-mock-decimals="0" data-mock-noise="0.05">324</span><span class="kpi-unit">µS</span></span>
+                        </div>
                         <div class="kpi ok">
                             <span class="kpi-label" data-i18n="p.lp_power">НД мощн.</span>
                             <span><span class="kpi-value" data-mock data-mock-base="850" data-mock-decimals="0" data-mock-noise="0.03">850</span><span class="kpi-unit">W</span></span>
@@ -296,14 +296,17 @@
                 </div>
 
                 <!-- Кнопки управления -->
+                <!-- Дизайн отражает топ-3 сценария Q1.3 (UI_SPEC §7):
+                     [Пуск AUTO] и [Ручной режим] — две LARGE primary кнопки,
+                     остальные — secondary / medium. -->
                 <div class="card" style="padding: var(--gap-md);">
                     <h3 class="card-title">Управление</h3>
                     <div class="control-stack">
                         <button class="btn btn-success btn-lg" data-confirm="confirm.start_auto" data-action="start_auto" data-i18n="main.start_auto">Пуск AUTO</button>
-                        <button class="btn btn-danger btn-lg" data-confirm="confirm.stop" data-action="stop" data-i18n="main.stop">Стоп</button>
+                        <button class="btn btn-lg" data-confirm="confirm.manual" data-action="manual" data-i18n="main.manual">Ручной режим</button>
                         <div class="control-row">
+                            <button class="btn btn-danger" data-confirm="confirm.stop" data-action="stop" data-i18n="main.stop">Стоп</button>
                             <button class="btn btn-secondary" data-confirm="confirm.washing" data-action="washing" data-i18n="main.washing">Промывка</button>
-                            <button class="btn btn-secondary" data-confirm="confirm.manual" data-action="manual" data-i18n="main.manual">Ручной режим</button>
                         </div>
                         <button class="btn btn-secondary" data-action="silence" data-i18n="main.silence">Заглушить алярмы</button>
                     </div>
