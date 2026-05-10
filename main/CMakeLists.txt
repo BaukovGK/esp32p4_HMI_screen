@@ -14,6 +14,7 @@ set(MAIN_SRCS
     "ui/ui_tokens.c"
     "ui/ui_statusbar.c"
     "ui/ui_tabbar.c"
+    "ui/ui_tank.c"
     "ui/ui_common.c"
     "ui/ui_events.c"
     "ui/screens/scr_mnemonic.c"

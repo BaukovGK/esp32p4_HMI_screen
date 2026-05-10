@@ -44,10 +44,14 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 композитные `lv_obj`-виджеты (предпочтительно — анимации проще).
 
 Компоненты (см. `proto/index.html` + `docs/UI_SPEC.md` §9):
-- [ ] **Tank widget** — `ui_tank_create(parent, id, geometry)`:
-      shell rect + clipped water-grad + animated wave + name + pct +
-      probe rod + N×level switches. Анимация волны через
-      `lv_anim_t` на translate.
+- [x] **Tank widget** (`ui_tank.h/.c`) — shell rect (clip_corner) +
+      water rect с linear gradient (light cyan → deep blue, LV_GRAD_DIR_VER)
+      + surface highlight 2px + name + pct (динамически центрируется на воде) +
+      probe rod (vertical 2px line) + N×level switches (8×8 dots + tags).
+      API: `ui_tank_create()` / `ui_tank_set_fill()` / `ui_tank_set_switch_state()`.
+      Контекст в user_data shell'а, авто-освобождение через LV_EVENT_DELETE.
+      ⚠️ TODO: анимация волны (translateX, 5s ease-in-out) — фаза 7.
+      ⚠️ TODO: dashed pattern на probe — пока solid с opacity 55%.
 - [ ] **Pump widget** — `ui_pump_create(parent, cx, cy)`:
       circle + 4 импеллер-blade'а + hub + label. Состояния через
       `ui_pump_set_state(obj, UI_PUMP_RUNNING)`. Вращение ротора —
