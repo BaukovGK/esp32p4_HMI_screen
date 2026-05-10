@@ -24,4 +24,4 @@ lv_obj_t *scr_alarms_create(lv_obj_t *parent);
  * @param container  корневой контейнер
  * @param data       актуальные данные установки (нужно для state и btn_reset)
  */
-void      scr_alarms_update(lv_obj_t *container, const plant_data_t *data);
+void      scr_alarms_update(lv_obj_t *container, const plant_data_t *data, uint32_t dirty);

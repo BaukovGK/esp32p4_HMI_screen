@@ -18,6 +18,7 @@
 #include "board.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -31,6 +32,8 @@
 
 static const char *TAG = "ui_main";
 
+#define STALE_DATA_TIMEOUT_US  (5 * 1000000LL)
+
 /**
  * Дескриптор экрана: содержит указатели на функции создания и обновления.
  * Функция create создаёт виджеты экрана внутри родительского контейнера.
@@ -38,7 +41,7 @@ static const char *TAG = "ui_main";
  */
 typedef struct {
     lv_obj_t *(*create)(lv_obj_t *parent);
-    void      (*update)(lv_obj_t *container, const plant_data_t *data);
+    void      (*update)(lv_obj_t *container, const plant_data_t *data, uint32_t dirty);
 } screen_desc_t;
 
 // Таблица дескрипторов всех экранов, индексируемая по screen_id_t
@@ -79,13 +82,20 @@ static void refresh_timer_cb(lv_timer_t *timer)
     if (!plant_data_lock(5)) return; // Таймаут 5 мс -- пропускаем кадр при занятом мьютексе
 
     const plant_data_t *data = plant_data_get();
+    uint32_t dirty = plant_data_get_and_clear_dirty();
+
+    int64_t now = esp_timer_get_time();
+    bool stale = (data->last_msg_time_us > 0) && ((now - data->last_msg_time_us) > STALE_DATA_TIMEOUT_US);
 
     // Панель аварий обновляется всегда, независимо от активного экрана
-    ui_alarm_bar_update(s_alarm_bar, data);
+    if (s_alarm_bar) {
+        ui_alarm_bar_set_stale(s_alarm_bar, stale);
+        ui_alarm_bar_update(s_alarm_bar, data);
+    }
 
     // Обновление виджетов текущего экрана
     if (s_screens[s_current].update && s_screen_obj) {
-        s_screens[s_current].update(s_screen_obj, data);
+        s_screens[s_current].update(s_screen_obj, data, dirty);
     }
 
     plant_data_unlock();
@@ -125,8 +135,8 @@ void ui_init(lv_display_t *disp)
     // Фаза 3: область контента и навигационная панель
     lvgl_port_lock(0);
     s_content = lv_obj_create(scr);
-    lv_obj_set_size(s_content, BOARD_DISP_H_RES, 700); // Высота = 800 - 40(alarm) - 60(nav)
-    lv_obj_set_pos(s_content, 0, 40);                   // Ниже панели аварий
+    lv_obj_set_size(s_content, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+    lv_obj_set_pos(s_content, 0, UI_ALARM_BAR_HEIGHT);   // Ниже панели аварий
     lv_obj_set_style_bg_color(s_content, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_content, 0, 0);

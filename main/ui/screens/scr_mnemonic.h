@@ -26,4 +26,4 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent);
  * @param container  корневой контейнер, созданный scr_mnemonic_create
  * @param data       актуальный снимок данных установки
  */
-void      scr_mnemonic_update(lv_obj_t *container, const plant_data_t *data);
+void      scr_mnemonic_update(lv_obj_t *container, const plant_data_t *data, uint32_t dirty);

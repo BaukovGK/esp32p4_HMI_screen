@@ -41,6 +41,12 @@
 #define COLOR_PUMP_RUNNING   lv_color_hex(0x00FF88)  // Насос работает -- зелёный
 #define COLOR_PUMP_FAULT     lv_color_hex(0xFF0000)  // Неисправность насоса -- красный
 
+/* Размеры основных UI-областей (пиксели) */
+#define UI_ALARM_BAR_HEIGHT    40
+#define UI_NAV_BAR_HEIGHT      60
+#define UI_CONTENT_HEIGHT      700
+#define UI_SCREEN_WIDTH        1280
+
 /**
  * Инициализация темы LVGL.
  * Создаёт тему по умолчанию с акцентным цветом и шрифтом 14pt,

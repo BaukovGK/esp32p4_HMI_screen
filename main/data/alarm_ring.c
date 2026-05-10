@@ -2,10 +2,10 @@
  * @file alarm_ring.c
  * @brief Реализация кольцевого буфера аварийных сообщений.
  *
- * Кольцевой буфер фиксированного размера ALARM_RING_SIZE (16 записей).
+ * Кольцевой буфер фиксированного размера ALARM_RING_SIZE (32 записи).
  * Структура данных:
  *   s_ring[ALARM_RING_SIZE] - массив записей alarm_entry_t
- *   s_head                  - индекс следующей позиции для записи (0..15)
+ *   s_head                  - индекс следующей позиции для записи (0..31)
  *   s_count                 - общее количество записей (0..ALARM_RING_SIZE)
  *
  * Механика кольцевого буфера:
@@ -37,6 +37,9 @@ static int s_count = 0;
 // Мьютекс для потокобезопасного доступа (отдельный от plant_data)
 static SemaphoreHandle_t s_mutex = NULL;
 
+// Монотонный счётчик изменений (инкрементируется при каждом push)
+static uint32_t s_generation = 0;
+
 /**
  * Инициализация кольцевого буфера.
  * Обнуляет массив и указатели, создаёт мьютекс.
@@ -49,6 +52,16 @@ void alarm_ring_init(void)
     s_count = 0;
     s_mutex = xSemaphoreCreateMutex();
     configASSERT(s_mutex); // фатальная ошибка если мьютекс не создан
+}
+
+void alarm_ring_clear(void)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memset(s_ring, 0, sizeof(s_ring));
+    s_head = 0;
+    s_count = 0;
+    s_generation++;
+    xSemaphoreGive(s_mutex);
 }
 
 /**
@@ -64,6 +77,8 @@ void alarm_ring_init(void)
  */
 void alarm_ring_push(const alarm_entry_t *entry)
 {
+    if (!entry) return;
+
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 
     // Если пришла деактивация — найти и снять активную аварию с таким же кодом
@@ -84,6 +99,8 @@ void alarm_ring_push(const alarm_entry_t *entry)
     s_head = (s_head + 1) % ALARM_RING_SIZE;
     // Инкремент счётчика, пока буфер не заполнен
     if (s_count < ALARM_RING_SIZE) s_count++;
+    // Инкремент счётчика поколений для детектирования изменений в UI
+    s_generation++;
 
     xSemaphoreGive(s_mutex);
 }
@@ -166,5 +183,18 @@ alarm_category_t alarm_ring_worst_active(void)
     }
     xSemaphoreGive(s_mutex);
     return worst;
+}
+/**
+ * Возвращает текущее значение счётчика поколений.
+ * Значение монотонно растёт при каждом alarm_ring_push().
+ * UI сравнивает с сохранённым значением для определения необходимости перестроения.
+ */
+uint32_t alarm_ring_generation(void)
+{
+    uint32_t gen;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    gen = s_generation;
+    xSemaphoreGive(s_mutex);
+    return gen;
 }
 #endif /* !LVGL_LIVE_PREVIEW */

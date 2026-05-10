@@ -82,18 +82,31 @@ typedef struct {
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+}
+
 /** Создаёт экран промывки: шаговый индикатор, панель температуры, кнопки. */
 lv_obj_t *scr_washing_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     washing_widgets_t *w = lv_malloc(sizeof(washing_widgets_t));
+    if (!w) return cont;
     lv_memzero(w, sizeof(washing_widgets_t));
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
 
     /* ---- Phase stepper (horizontal row, full width) ---- */
     int32_t circle_d = 56;
@@ -195,9 +208,9 @@ lv_obj_t *scr_washing_create(lv_obj_t *parent)
     int32_t btn_w = 300;
     int32_t btn_h = 64;
     int32_t btn_gap = 24;
-    /* 3 buttons: 3*300 + 2*24 = 948, margin = (1280-948)/2 = 166 */
+    /* 3 buttons: 3*300 + 2*24 = 948, margin = (UI_SCREEN_WIDTH-948)/2 = 166 */
     int32_t btn_x0 = 166;
-    int32_t btn_y = 700 - 100 - btn_h;
+    int32_t btn_y = UI_CONTENT_HEIGHT - 100 - btn_h;
 
     /* START WASHING button (visible when NOT in washing state) */
     w->btn_start = lv_button_create(cont);
@@ -257,10 +270,11 @@ lv_obj_t *scr_washing_create(lv_obj_t *parent)
  * Логика цветов кругов: пройдённые -- зелёные, текущий -- акцент, будущие -- серые.
  * Кнопка ПОДТВЕРДИТЬ видна только на фазах ожидания (WAIT_HEAT/SUPPLY/DRAIN).
  */
-void scr_washing_update(lv_obj_t *container, const plant_data_t *d)
+void scr_washing_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     washing_widgets_t *w = (washing_widgets_t *)lv_obj_get_user_data(container);
     if (!w) return;
+    if (!(dirty & (DIRTY_STATE | DIRTY_ANALOG))) return;
 
     int active_idx = wash_sub_to_index(d->wash_sub);
 
@@ -307,7 +321,7 @@ void scr_washing_update(lv_obj_t *container, const plant_data_t *d)
     }
 
     /* Temperature display: "current / target  C" */
-    char buf[64];
+    char buf[96];
     float t_cur = d->temperature.fault ? NAN : d->temperature.value;
     float t_tgt = d->set_washing.target_temp_C;
 
@@ -326,8 +340,8 @@ void scr_washing_update(lv_obj_t *container, const plant_data_t *d)
         lv_obj_set_style_text_color(w->lbl_temp_current, COLOR_TEXT_VALUE, 0);
     }
 
-    /* Target info */
-    snprintf(buf, sizeof(buf), "Target: %.1f \xc2\xb0\x43  |  Max: %.1f \xc2\xb0\x43",
+    /* Format string must contain exactly two %.1f specifiers */
+    snprintf(buf, sizeof(buf), lang_str(STR_WASH_TARGET_INFO),
              (double)d->set_washing.target_temp_C,
              (double)d->set_washing.max_temp_C);
     lv_label_set_text(w->lbl_temp_target, buf);

@@ -44,12 +44,19 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         ESP_LOGI(TAG, "Connected to MQTT broker");
         // Обновляем статус подключения в общей структуре данных
         plant_data_set_mqtt_status(true);
+        int msg_id;
         // Подписка на все топики статуса установки (QoS 0)
-        esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_STATUS_ALL, 0);
+        msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_STATUS_ALL, 0);
+        if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_STATUS_ALL);
         // Подписка на аварийные сообщения (QoS 1 для гарантии доставки)
-        esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_ALARMS, 1);
+        msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_ALARMS, 1);
+        if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_ALARMS);
+        // Подписка на availability контроллера (retained, QoS 1)
+        msg_id = esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_AVAILABILITY, 1);
+        if (msg_id < 0) ESP_LOGE(TAG, "Failed to subscribe to %s", MQTT_TOPIC_AVAILABILITY);
         /* Публикация доступности HMI (retained) */
-        esp_mqtt_client_publish(s_client, "ro_hmi/availability", "online", 0, 1, 1);
+        msg_id = esp_mqtt_client_publish(s_client, MQTT_TOPIC_HMI_AVAILABILITY, "online", 0, 1, 1);
+        if (msg_id < 0) ESP_LOGE(TAG, "Failed to publish availability");
         break;
 
     case MQTT_EVENT_DISCONNECTED:
@@ -59,6 +66,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
         break;
 
     case MQTT_EVENT_DATA:
+        // Пропуск фрагментированных сообщений (payload > buffer.size)
+        if (event->current_data_offset > 0 || event->data_len < event->total_data_len) {
+            ESP_LOGW(TAG, "Fragmented MQTT message (%d/%d), skipping",
+                     event->data_len, event->total_data_len);
+            break;
+        }
         // Передача входящего сообщения парсеру для обработки
         mqtt_handle_incoming(event->topic, event->topic_len,
                              event->data, event->data_len);
@@ -94,7 +107,7 @@ esp_err_t mqtt_client_start(void)
         .broker.address.uri = CONFIG_MQTT_BROKER_URI,
         .credentials.client_id = CONFIG_MQTT_CLIENT_ID,
         .session.last_will = {
-            .topic = "ro_hmi/availability",   // Топик Last Will Testament
+            .topic = MQTT_TOPIC_HMI_AVAILABILITY,  // Топик Last Will Testament
             .msg = "offline",                  // Сообщение при потере связи
             .msg_len = 7,
             .qos = 1,                          // Гарантированная доставка
@@ -162,7 +175,7 @@ bool mqtt_client_is_connected(void)
  */
 esp_err_t mqtt_publish_mode_cmd(const char *cmd)
 {
-    if (!s_client) return ESP_ERR_INVALID_STATE;
+    if (!s_client || !cmd) return ESP_ERR_INVALID_STATE;
     int ret = esp_mqtt_client_publish(s_client, MQTT_TOPIC_CMD_MODE,
                                       cmd, 0, 1, 0);
     return (ret >= 0) ? ESP_OK : ESP_FAIL;

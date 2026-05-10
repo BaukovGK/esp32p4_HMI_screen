@@ -18,9 +18,35 @@
 
 #ifndef LVGL_LIVE_PREVIEW
 #include "esp_log.h"
-#else
+#endif
+
+#ifndef LVGL_LIVE_PREVIEW
+#include "esp_timer.h"
+#endif
+
+#ifdef LVGL_LIVE_PREVIEW
 #define ESP_LOGI(tag, ...) ((void)0)
 #endif
+
+/** Minimum interval between commands (milliseconds) */
+#define CMD_COOLDOWN_MS 1000
+
+static int64_t s_last_cmd_time_us = 0;
+
+/** Check if cooldown has elapsed since last command. Returns true if OK to send. */
+static bool check_cooldown(void)
+{
+#ifndef LVGL_LIVE_PREVIEW
+    int64_t now = esp_timer_get_time();
+    if ((now - s_last_cmd_time_us) < (CMD_COOLDOWN_MS * 1000LL)) {
+        return false;
+    }
+    s_last_cmd_time_us = now;
+#endif
+    return true;
+}
+
+static bool s_confirm_open = false;
 
 static const char *TAG = "ui_evt";
 
@@ -41,10 +67,10 @@ typedef struct {
  */
 static void confirm_close(lv_event_t *e)
 {
-    lv_obj_t *btn = lv_event_get_target(e);
     lv_obj_t *overlay = (lv_obj_t *)lv_event_get_user_data(e);
     confirm_ctx_t *ctx = (confirm_ctx_t *)lv_obj_get_user_data(overlay);
     if (ctx) lv_free(ctx); // Освобождение контекста диалога
+    s_confirm_open = false;
     lv_obj_delete(overlay); // Удаление модального оверлея
 }
 
@@ -61,6 +87,7 @@ static void confirm_yes_cb(lv_event_t *e)
         mqtt_publish_mode_cmd(ctx->mqtt_cmd); // Отправка команды на контроллер
         lv_free(ctx);
     }
+    s_confirm_open = false;
     lv_obj_delete(overlay);
 }
 
@@ -76,14 +103,21 @@ static void confirm_yes_cb(lv_event_t *e)
  */
 static void show_confirm_dialog(str_id_t message_id, const char *mqtt_cmd)
 {
+    if (s_confirm_open) return;
+    s_confirm_open = true;
+
     // Выделение контекста для хранения команды
     confirm_ctx_t *ctx = lv_malloc(sizeof(confirm_ctx_t));
+    if (!ctx) {
+        s_confirm_open = false;
+        return;
+    }
     ctx->mqtt_cmd = mqtt_cmd;
 
     // Полупрозрачный оверлей на весь экран (1280x800)
     lv_obj_t *overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(overlay);
-    lv_obj_set_size(overlay, 1280, 800);
+    lv_obj_set_size(overlay, UI_SCREEN_WIDTH, 800);
     lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(overlay, LV_OPA_50, 0);         // 50% прозрачности
     lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
@@ -152,6 +186,7 @@ static void show_confirm_dialog(str_id_t message_id, const char *mqtt_cmd)
 /** Запуск автоматического режима -- MQTT-команда "start_auto" */
 void ui_evt_start_auto(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     show_confirm_dialog(STR_CONFIRM_START_AUTO, "start_auto");
 }
@@ -159,6 +194,7 @@ void ui_evt_start_auto(lv_event_t *e)
 /** Остановка установки -- MQTT-команда "stop" */
 void ui_evt_stop(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     show_confirm_dialog(STR_CONFIRM_STOP, "stop");
 }
@@ -166,6 +202,7 @@ void ui_evt_stop(lv_event_t *e)
 /** Переход в ручной режим -- MQTT-команда "set_manual" */
 void ui_evt_set_manual(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     show_confirm_dialog(STR_CONFIRM_MANUAL, "set_manual");
 }
@@ -173,6 +210,7 @@ void ui_evt_set_manual(lv_event_t *e)
 /** Запуск промывки мембран -- MQTT-команда "start_washing" */
 void ui_evt_start_washing(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     show_confirm_dialog(STR_CONFIRM_WASHING, "start_washing");
 }
@@ -180,6 +218,7 @@ void ui_evt_start_washing(lv_event_t *e)
 /** Подтверждение этапа промывки -- отправляется немедленно, без диалога */
 void ui_evt_confirm_wash(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     ESP_LOGI(TAG, "CMD: confirm_wash");
     mqtt_publish_mode_cmd("confirm_wash");
@@ -188,6 +227,7 @@ void ui_evt_confirm_wash(lv_event_t *e)
 /** Сброс аварии -- отправляется немедленно, без диалога */
 void ui_evt_reset_fault(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     (void)e;
     ESP_LOGI(TAG, "CMD: reset_fault");
     mqtt_publish_mode_cmd("reset_fault");
@@ -200,6 +240,7 @@ void ui_evt_reset_fault(lv_event_t *e)
  */
 void ui_evt_pump_toggle(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     int bit = (int)(intptr_t)lv_event_get_user_data(e); // Индекс бита насоса (0..4)
     lv_obj_t *sw = lv_event_get_target(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
@@ -220,6 +261,7 @@ void ui_evt_pump_toggle(lv_event_t *e)
 /** Включение/отключение дозатора антискаланта через MQTT */
 void ui_evt_doser_toggle(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     lv_obj_t *sw = lv_event_get_target(e);
     bool en = lv_obj_has_state(sw, LV_STATE_CHECKED);
     ESP_LOGI(TAG, "CMD: doser enabled=%d", en);
@@ -229,6 +271,7 @@ void ui_evt_doser_toggle(lv_event_t *e)
 /** Включение/отключение нагревателя промывочного раствора через MQTT */
 void ui_evt_heater_toggle(lv_event_t *e)
 {
+    if (!check_cooldown()) return;
     lv_obj_t *sw = lv_event_get_target(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
     ESP_LOGI(TAG, "CMD: heater on=%d", on);

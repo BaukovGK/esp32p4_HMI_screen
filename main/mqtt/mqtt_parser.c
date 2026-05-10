@@ -11,12 +11,14 @@
  * - ro_plant/status/io             -- цифровые входы/выходы
  * - ro_plant/status/analog/{P1..P4,T} -- аналоговые датчики
  * - ro_plant/status/flow/{Q1..Q4}  -- расходомеры
- * - ro_plant/status/conductivity/{s1..s3} -- кондуктометры
+ * - ro_plant/status/conductivity/{s1..s4} -- кондуктометры (s4=концентрат)
+ * - ro_plant/status/power/{lp,hp}  -- счётчики KWS-306L (НД и ВД-насос)
  * - ro_plant/status/telemetry      -- расчетная телеметрия
  * - ro_plant/status/doser          -- статус дозатора
  * - ro_plant/status/interlocks     -- блокировки
  * - ro_plant/status/diagnostics    -- диагностика контроллера
  * - ro_plant/alarms                -- аварийные сообщения
+ * - ro_plant/availability          -- "online"/"offline" контроллера (НЕ JSON)
  */
 #ifndef LVGL_LIVE_PREVIEW
 #include "mqtt_parser.h"
@@ -78,6 +80,14 @@ static int json_get_int(const cJSON *obj, const char *key, int def)
     cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (!item || !cJSON_IsNumber(item)) return def;
     return item->valueint;
+}
+
+/** Получение int64 значения из JSON (через valuedouble для большого диапазона). */
+static int64_t json_get_int64(const cJSON *obj, const char *key, int64_t def)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!item || !cJSON_IsNumber(item)) return def;
+    return (int64_t)item->valuedouble;
 }
 
 /**
@@ -243,7 +253,7 @@ static void parse_flow(const cJSON *json, const char *name)
  * JSON: {"conductivity": 450.0, "temperature": 25.3, "ok": true}
  * - conductivity -- удельная электропроводность (мкСм/см)
  * - temperature  -- температура раствора (C)
- * Суффикс топика: s1..s3 -> индекс 0..2
+ * Суффикс топика: s1..s4 -> индекс 0..3 (s4 — концентрат, добавлен 2026-05-09).
  *
  * @param json JSON-объект сообщения
  * @param name Суффикс топика (например, "s1")
@@ -258,8 +268,40 @@ static void parse_conductivity(const cJSON *json, const char *name)
     if (strcmp(name, "s1") == 0)      idx = 0;
     else if (strcmp(name, "s2") == 0) idx = 1;
     else if (strcmp(name, "s3") == 0) idx = 2;
+    else if (strcmp(name, "s4") == 0) idx = 3;
 
     if (idx >= 0) plant_data_set_conductivity(idx, c, t, ok);
+}
+
+/* ---- Парсер счётчика электроэнергии KWS-306L ---- */
+
+/**
+ * Парсинг сообщения KWS-306L (ro_plant/status/power/{name}).
+ *
+ * JSON: {"voltage":230.5, "current":5.2, "power":1205.3,
+ *        "energy":12.45, "temperature":45.2, "online":true}
+ * Любое из полей V/A/W/kWh/T может быть null, что трактуется как NAN
+ * ("датчик не отвечает / нет данных"). Поле online — обязательный bool.
+ *
+ * @param json JSON-объект сообщения
+ * @param name Суффикс топика: "lp" (НД-насос) или "hp" (ВД-насос)
+ */
+static void parse_power(const cJSON *json, const char *name)
+{
+    int idx = -1;
+    if (strcmp(name, "lp") == 0)      idx = 0;
+    else if (strcmp(name, "hp") == 0) idx = 1;
+    if (idx < 0) return;
+
+    power_meter_data_t pm = {
+        .voltage     = json_get_float(json, "voltage",     NAN),
+        .current     = json_get_float(json, "current",     NAN),
+        .power       = json_get_float(json, "power",       NAN),
+        .energy      = json_get_float(json, "energy",      NAN),
+        .temperature = json_get_float(json, "temperature", NAN),
+        .online      = json_get_bool (json, "online",      false),
+    };
+    plant_data_set_power_meter(idx, &pm);
 }
 
 /* ---- Парсер телеметрии ---- */
@@ -340,12 +382,13 @@ static void parse_diagnostics(const cJSON *json)
     diagnostics_t diag = {0};
     diag.heap_free = (uint32_t)json_get_int(json, "heap_free", 0);
     diag.heap_min  = (uint32_t)json_get_int(json, "heap_min", 0);
-    diag.uptime_s  = (int64_t)json_get_int(json, "uptime_s", 0);
+    diag.uptime_s  = json_get_int64(json, "uptime_s", 0);
     diag.wdt_stale = (uint32_t)json_get_int(json, "wdt_stale", 0);
 
-    // Парсинг вложенного объекта остатков стеков задач
+    // Парсинг вложенного объекта остатков стеков задач.
+    // Ключи стека динамические (имена FreeRTOS-задач) — мэппим по фактическим именам.
     cJSON *stack = cJSON_GetObjectItemCaseSensitive(json, "stack");
-    if (stack) {
+    if (stack && cJSON_IsObject(stack)) {
         diag.stack_modbus   = (uint32_t)json_get_int(stack, "modbus", 0);
         diag.stack_io       = (uint32_t)json_get_int(stack, "io", 0);
         diag.stack_process  = (uint32_t)json_get_int(stack, "process", 0);
@@ -353,21 +396,27 @@ static void parse_diagnostics(const cJSON *json)
         diag.stack_mqtt     = (uint32_t)json_get_int(stack, "mqtt", 0);
     }
 
-    // Парсинг вложенного объекта статистики Modbus
+    /*
+     * Парсинг массива Modbus-устройств. Контроллер с 2026-05-09 публикует
+     * "modbus" как массив объектов: [{"addr":N,"errors":N,"online":true}, ...]
+     * (раньше были два параллельных массива errors[] и online[]).
+     * Берём первые 4 устройства; сохраняем индексы в plant_data в том порядке,
+     * в каком пришли (UI пока не показывает adr — только сам факт ошибок/online).
+     */
     cJSON *modbus = cJSON_GetObjectItemCaseSensitive(json, "modbus");
-    if (modbus) {
-        cJSON *errors = cJSON_GetObjectItemCaseSensitive(modbus, "errors");
-        cJSON *online = cJSON_GetObjectItemCaseSensitive(modbus, "online");
-        // Перебор 4 устройств на шине Modbus
-        for (int i = 0; i < 4; i++) {
-            if (errors && cJSON_IsArray(errors)) {
-                cJSON *e = cJSON_GetArrayItem(errors, i);
-                if (e) diag.modbus_errors[i] = (uint32_t)e->valueint;
-            }
-            if (online && cJSON_IsArray(online)) {
-                cJSON *o = cJSON_GetArrayItem(online, i);
-                if (o) diag.modbus_online[i] = cJSON_IsTrue(o);
-            }
+    if (modbus && cJSON_IsArray(modbus)) {
+        int total = cJSON_GetArraySize(modbus);
+        int n = total < 4 ? total : 4;
+        for (int i = 0; i < n; i++) {
+            cJSON *dev = cJSON_GetArrayItem(modbus, i);
+            if (!dev || !cJSON_IsObject(dev)) continue;
+            diag.modbus_errors[i] = (uint32_t)json_get_int(dev, "errors", 0);
+            diag.modbus_online[i] = json_get_bool(dev, "online", false);
+        }
+        // Оставшиеся слоты (если устройств меньше 4) сбросить в "оффлайн без ошибок"
+        for (int i = n; i < 4; i++) {
+            diag.modbus_errors[i] = 0;
+            diag.modbus_online[i] = false;
         }
     }
 
@@ -404,7 +453,7 @@ static void parse_alarm(const cJSON *json)
 {
     alarm_entry_t entry = {0};
     entry.id = (uint32_t)json_get_int(json, "id", 0);
-    entry.ts = (int64_t)json_get_int(json, "ts", 0);
+    entry.ts = json_get_int64(json, "ts", 0);
     entry.cat = parse_alarm_cat(json_get_string(json, "cat", "INFO"));
     entry.value = json_get_float(json, "value", 0);
     entry.active = json_get_bool(json, "active", true);
@@ -412,13 +461,15 @@ static void parse_alarm(const cJSON *json)
     const char *code = json_get_string(json, "code", "UNKNOWN");
     strncpy(entry.code, code, sizeof(entry.code) - 1);
 
-    // Добавление аварии в кольцевой буфер
-    alarm_ring_push(&entry);
-
-    /* Установка флага "грязных" данных для обновления экрана аварий */
+    /* Добавление аварии в кольцевой буфер и установка dirty-флага.
+     * Порядок захвата мьютексов: plant_data -> alarm_ring (совпадает с UI-потоком). */
     if (plant_data_lock(10)) {
+        alarm_ring_push(&entry);
         plant_data_get_mutable()->dirty_flags |= DIRTY_ALARMS;
         plant_data_unlock();
+    } else {
+        /* Fallback: если не удалось захватить мьютекс, всё равно добавляем аварию */
+        alarm_ring_push(&entry);
     }
 }
 
@@ -444,10 +495,22 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
                           const char *data, int data_len)
 {
     // Копирование топика в локальный буфер с нуль-терминатором
-    char topic_buf[128];
+    #define MQTT_TOPIC_BUF_SIZE 128
+    char topic_buf[MQTT_TOPIC_BUF_SIZE];
     int len = (topic_len < (int)sizeof(topic_buf) - 1) ? topic_len : (int)sizeof(topic_buf) - 1;
     memcpy(topic_buf, topic, len);
     topic_buf[len] = '\0';
+
+    /*
+     * Availability контроллера — это plain-text ("online" / "offline"),
+     * не JSON. Обрабатываем до cJSON_ParseWithLength, чтобы не получить
+     * ложную ошибку парсинга. На будущее (P-NEXT): отразить в plant_data
+     * отдельный флаг controller_online — пока этим занимается last_msg_time_us.
+     */
+    if (strcmp(topic_buf, MQTT_TOPIC_AVAILABILITY) == 0) {
+        ESP_LOGI(TAG, "controller availability=%.*s", data_len, data);
+        return;
+    }
 
     // Парсинг JSON-payload (cJSON требует данные с известной длиной)
     cJSON *json = cJSON_ParseWithLength(data, data_len);
@@ -470,6 +533,9 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
     } else if (strncmp(topic_buf, MQTT_TOPIC_COND_PREFIX,
                        strlen(MQTT_TOPIC_COND_PREFIX)) == 0) {
         parse_conductivity(json, topic_buf + strlen(MQTT_TOPIC_COND_PREFIX)); // Кондуктометры
+    } else if (strncmp(topic_buf, MQTT_TOPIC_POWER_PREFIX,
+                       strlen(MQTT_TOPIC_POWER_PREFIX)) == 0) {
+        parse_power(json, topic_buf + strlen(MQTT_TOPIC_POWER_PREFIX));   // KWS-306L lp/hp
     } else if (strcmp(topic_buf, MQTT_TOPIC_TELEMETRY) == 0) {
         parse_telemetry(json);                                      // Телеметрия
     } else if (strcmp(topic_buf, MQTT_TOPIC_DOSER) == 0) {

@@ -132,7 +132,7 @@ plant_data_t *plant_data_get_mutable(void)
     return &s_preview_data;
 }
 
-uint32_t plant_data_get_and_clear_dirty(void) { return 0; }
+uint32_t plant_data_get_and_clear_dirty(void) { return ~0u; }
 
 /* Setters (no-op in preview) */
 void plant_data_set_state(plant_state_t s, auto_sub_state_t a,
@@ -163,6 +163,26 @@ void plant_data_set_doser(doser_state_t s, bool e)
 
 void plant_data_set_diagnostics(const diagnostics_t *d) { (void)d; }
 void plant_data_set_mqtt_status(bool c) { (void)c; }
+
+void plant_data_set_power_meter(int i, const power_meter_data_t *d)
+{ (void)i; (void)d; }
+
+power_meter_data_t plant_data_get_power_lp(void)
+{
+    power_meter_data_t z = { NAN, NAN, NAN, NAN, NAN, false };
+    return z;
+}
+power_meter_data_t plant_data_get_power_hp(void)
+{
+    power_meter_data_t z = { NAN, NAN, NAN, NAN, NAN, false };
+    return z;
+}
+
+/* NVS save stubs (no-op in preview) */
+void plant_data_save_settings_pressure(const settings_pressure_t *s)  { (void)s; }
+void plant_data_save_settings_doser(const settings_doser_t *s)        { (void)s; }
+void plant_data_save_settings_washing(const settings_washing_t *s)    { (void)s; }
+void plant_data_save_settings_timeouts(const settings_timeouts_t *s)  { (void)s; }
 
 /* ================================================================
  *  Stub: alarm_ring (static mock alarms)
@@ -195,6 +215,8 @@ int alarm_ring_get_history(alarm_entry_t *out, int max_count)
 
 int alarm_ring_active_count(void) { return 2; }
 alarm_category_t alarm_ring_worst_active(void) { return ALARM_CAT_ALARM; }
+uint32_t alarm_ring_generation(void) { return 1; }
+void alarm_ring_clear(void) { }
 
 /* ================================================================
  *  Stub: MQTT publish functions (no-op in preview)
@@ -223,7 +245,7 @@ esp_err_t mqtt_publish_settings_timeouts(const settings_timeouts_t *s)
 
 typedef struct {
     lv_obj_t *(*create)(lv_obj_t *parent);
-    void      (*update)(lv_obj_t *container, const plant_data_t *data);
+    void      (*update)(lv_obj_t *container, const plant_data_t *data, uint32_t dirty);
 } preview_screen_t;
 
 static const preview_screen_t s_screens[] = {
@@ -256,7 +278,7 @@ static void preview_switch_screen(int id)
 
     /* Immediately fill with mock data */
     if (s_screens[id].update && s_screen_obj) {
-        s_screens[id].update(s_screen_obj, &s_preview_data);
+        s_screens[id].update(s_screen_obj, &s_preview_data, ~0u);
     }
 }
 
@@ -270,7 +292,7 @@ static void preview_refresh_cb(lv_timer_t *timer)
     (void)timer;
     ui_alarm_bar_update(s_alarm_bar, &s_preview_data);
     if (s_screens[s_current_screen].update && s_screen_obj) {
-        s_screens[s_current_screen].update(s_screen_obj, &s_preview_data);
+        s_screens[s_current_screen].update(s_screen_obj, &s_preview_data, ~0u);
     }
 }
 
@@ -294,10 +316,10 @@ void lvgl_live_preview_init(void)
     /* Alarm bar (40px top strip) */
     s_alarm_bar = ui_alarm_bar_create(scr);
 
-    /* Content area (1280 x 700) */
+    /* Content area (UI_SCREEN_WIDTH x UI_CONTENT_HEIGHT) */
     s_content = lv_obj_create(scr);
-    lv_obj_set_size(s_content, 1280, 700);
-    lv_obj_set_pos(s_content, 0, 40);
+    lv_obj_set_size(s_content, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
+    lv_obj_set_pos(s_content, 0, UI_ALARM_BAR_HEIGHT);
     lv_obj_set_style_bg_color(s_content, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_content, 0, 0);
@@ -315,7 +337,7 @@ void lvgl_live_preview_init(void)
 
     /* Fill with mock data */
     ui_alarm_bar_update(s_alarm_bar, &s_preview_data);
-    s_screens[SCREEN_MNEMONIC].update(s_screen_obj, &s_preview_data);
+    s_screens[SCREEN_MNEMONIC].update(s_screen_obj, &s_preview_data, ~0u);
 
     /* Periodic refresh timer (250ms, same as real HMI) */
     lv_timer_create(preview_refresh_cb, 250, NULL);

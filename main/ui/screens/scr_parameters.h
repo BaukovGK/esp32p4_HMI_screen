@@ -22,4 +22,4 @@ lv_obj_t *scr_parameters_create(lv_obj_t *parent);
  * @param container  корневой контейнер
  * @param data       актуальные данные установки
  */
-void      scr_parameters_update(lv_obj_t *container, const plant_data_t *data);
+void      scr_parameters_update(lv_obj_t *container, const plant_data_t *data, uint32_t dirty);

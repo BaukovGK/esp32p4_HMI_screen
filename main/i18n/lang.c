@@ -5,9 +5,19 @@
  * Содержит внутреннее состояние (текущий язык) и логику доступа к строкам.
  * Модуль не является потокобезопасным -- предполагается, что переключение
  * языка и чтение строк выполняются из одного потока (LVGL-задача).
+ *
+ * Язык сохраняется в NVS и восстанавливается при следующем запуске.
  */
 #include "lang.h"
 #include <stddef.h>
+#ifndef LVGL_LIVE_PREVIEW
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_log.h"
+static const char *TAG = "lang";
+#define LANG_NVS_NAMESPACE  "ro_settings"
+#define LANG_NVS_KEY        "lang"
+#endif
 
 // Текущий выбранный язык (по умолчанию -- русский)
 static lang_id_t s_current_lang = LANG_RU;
@@ -30,6 +40,19 @@ void lang_init(lang_id_t default_lang)
     s_tables[LANG_EN] = lang_en_strings;  // регистрация английской таблицы
     s_tables[LANG_RU] = lang_ru_strings;  // регистрация русской таблицы
     s_current_lang = default_lang;
+
+#ifndef LVGL_LIVE_PREVIEW
+    /* Попытка загрузить сохранённый язык из NVS */
+    nvs_handle_t nvs;
+    if (nvs_open(LANG_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t saved = 0;
+        if (nvs_get_u8(nvs, LANG_NVS_KEY, &saved) == ESP_OK && saved < LANG_COUNT) {
+            s_current_lang = (lang_id_t)saved;
+            ESP_LOGI(TAG, "NVS: loaded language %d", saved);
+        }
+        nvs_close(nvs);
+    }
+#endif
 }
 
 /**
@@ -43,6 +66,16 @@ void lang_set(lang_id_t lang)
 {
     if (lang < LANG_COUNT) {
         s_current_lang = lang;  // защита от выхода за границы массива
+
+#ifndef LVGL_LIVE_PREVIEW
+        /* Сохранение выбранного языка в NVS */
+        nvs_handle_t nvs;
+        if (nvs_open(LANG_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+            nvs_set_u8(nvs, LANG_NVS_KEY, (uint8_t)lang);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+        }
+#endif
     }
 }
 
@@ -66,7 +99,9 @@ lang_id_t lang_get(void)
  */
 const char *lang_str(str_id_t id)
 {
-    if (id >= STR_COUNT) return "???";           // проверка границ
-    const char *s = s_tables[s_current_lang][id]; // выборка из текущей таблицы
-    return s ? s : "???";                         // защита от NULL
+    if (id >= STR_COUNT) return "???";
+    const char *const *tbl = s_tables[s_current_lang];
+    if (!tbl) return "???";
+    const char *s = tbl[id];
+    return s ? s : "???";
 }
