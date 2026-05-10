@@ -30,6 +30,7 @@
 #include "ui_pipe.h"
 #include "ui_sensor_modal.h"
 #include "ui_equipment_modal.h"
+#include "ui_events.h"
 #include "lang.h"
 #include <math.h>
 #include <stdio.h>
@@ -40,6 +41,21 @@
  * Прототип использует viewBox "0 30 900 530" — вычитаем 30 из y. */
 #define SX(svg_x) MNEMO_PX(svg_x)
 #define SY(svg_y) MNEMO_PX((svg_y) - 30)
+
+/* ─── layout главного экрана ───────────────────────────────────────
+ * Сетка: [мнемо] [right panel 320] с padding 12 и gap 12.
+ *   inner_w = 1280 - 24 = 1256
+ *   left_area_w = 1256 - 12 - 320 = 924
+ *   left_area_h = 692 - 24 = 668
+ *   canvas (MNEMO_PX_W × MNEMO_PX_H = 900×530) центрируется в left area. */
+#define PAGE_PAD       12
+#define COL_GAP        12
+#define RIGHT_PANEL_W  320
+#define LEFT_AREA_W    (UI_SCREEN_W - 2 * PAGE_PAD - COL_GAP - RIGHT_PANEL_W)
+#define LEFT_AREA_H    (UI_CONTENT_H - 2 * PAGE_PAD)
+#define RIGHT_PANEL_X  (PAGE_PAD + LEFT_AREA_W + COL_GAP)
+#define RIGHT_PANEL_Y  PAGE_PAD
+#define RIGHT_PANEL_H  LEFT_AREA_H
 
 /* ─── widgets context ─────────────────────────────────────────────── */
 
@@ -56,6 +72,13 @@ typedef struct {
     lv_obj_t *s_p1, *s_p2, *s_p3, *s_p4;
     lv_obj_t *s_q1, *s_q2, *s_q3, *s_q4;
     lv_obj_t *s_sigma2, *s_sigma3;
+    /* KPI cards в правой панели — value labels */
+    lv_obj_t *kpi_p3;       /* давление 1-й ст. (bar) */
+    lv_obj_t *kpi_p4;       /* давление 2-й ст. (bar) */
+    lv_obj_t *kpi_sigma3;   /* проводимость пермеата (μS/cm) */
+    lv_obj_t *kpi_q3;       /* расход пермеата (m³/h) */
+    lv_obj_t *kpi_temp;     /* температура (°C) */
+    lv_obj_t *kpi_sigma1;   /* проводимость питания (μS/cm) */
 } mnemonic_widgets_t;
 
 static void widgets_free_cb(lv_event_t *e)
@@ -116,6 +139,192 @@ static void attach_equipment_click(lv_obj_t *obj, const char *id)
     lv_obj_add_event_cb(obj, on_equipment_click, LV_EVENT_CLICKED, (void *)id);
 }
 
+/* ─── KPI row helper: "Метка:    Значение [unit]" ─────────────────── */
+static lv_obj_t *create_kpi_row(lv_obj_t *parent, const char *label,
+                                 const char *unit)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = lv_label_create(row);
+    lv_label_set_text(l, label);
+    lv_obj_set_style_text_color(l, ui_token_text_secondary(), 0);
+    lv_obj_set_style_text_font(l, UI_FONT_SM, 0);
+
+    /* Значение + unit как inline-сцепка (но реально один label '%v %u' */
+    lv_obj_t *v = lv_label_create(row);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "— %s", unit ? unit : "");
+    lv_label_set_text(v, buf);
+    lv_obj_set_style_text_color(v, ui_token_text_primary(), 0);
+    lv_obj_set_style_text_font(v, UI_FONT_MD, 0);
+    return v;   /* возвращаем value label для последующих обновлений */
+}
+
+/* ─── обновление KPI значения с цветом по состоянию ───────────────── */
+static void update_kpi_value(lv_obj_t *val_label, float v, int decimals,
+                              const char *unit, lv_color_t color)
+{
+    if (!val_label) return;
+    char buf[24];
+    if (isnan(v)) {
+        snprintf(buf, sizeof(buf), "— %s", unit ? unit : "");
+    } else {
+        snprintf(buf, sizeof(buf), "%.*f %s", decimals, v, unit ? unit : "");
+    }
+    lv_label_set_text(val_label, buf);
+    lv_obj_set_style_text_color(val_label, color, 0);
+}
+
+/* Классификация значения по двум порогам (warn, alarm) → цвет. */
+static lv_color_t classify_color(float v, float warn, float alarm)
+{
+    if (isnan(v))     return ui_token_text_muted();
+    if (v >= alarm)   return ui_token_danger();
+    if (v >= warn)    return ui_token_warning();
+    return ui_token_accent();
+}
+
+/* ─── создание Action button ──────────────────────────────────────── */
+static lv_obj_t *create_panel_btn(lv_obj_t *parent, const char *text,
+                                   lv_color_t bg_color, lv_color_t text_color,
+                                   int height, lv_event_cb_t cb)
+{
+    lv_obj_t *btn = lv_button_create(parent);
+    lv_obj_set_size(btn, LV_PCT(100), height);
+    lv_obj_set_style_bg_color(btn, bg_color, 0);
+    lv_obj_set_style_radius(btn, UI_RADIUS_MD, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    if (cb) lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_color(lbl, text_color, 0);
+    lv_obj_set_style_text_font(lbl, UI_FONT_MD, 0);
+    lv_obj_center(lbl);
+    return btn;
+}
+
+/* ─── правая панель: KPI card + Control card ─────────────────────── */
+static void create_right_panel(lv_obj_t *parent, mnemonic_widgets_t *w)
+{
+    /* Контейнер правой панели — flex column с двумя cards. */
+    lv_obj_t *col = lv_obj_create(parent);
+    lv_obj_set_pos(col, RIGHT_PANEL_X, RIGHT_PANEL_Y);
+    lv_obj_set_size(col, RIGHT_PANEL_W, RIGHT_PANEL_H);
+    lv_obj_set_style_bg_opa(col, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(col, 0, 0);
+    lv_obj_set_style_pad_all(col, 0, 0);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, UI_GAP_MD, 0);
+    lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* ─── KPI card ────────────────────────────────────────────────── */
+    lv_obj_t *kpi_card = lv_obj_create(col);
+    lv_obj_set_size(kpi_card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(kpi_card, ui_token_bg_card(), 0);
+    lv_obj_set_style_bg_opa(kpi_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(kpi_card, ui_token_border(), 0);
+    lv_obj_set_style_border_width(kpi_card, 1, 0);
+    lv_obj_set_style_radius(kpi_card, UI_RADIUS_LG, 0);
+    lv_obj_set_style_pad_all(kpi_card, UI_GAP_MD, 0);
+    lv_obj_set_flex_flow(kpi_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(kpi_card, UI_GAP_SM, 0);
+    lv_obj_remove_flag(kpi_card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *kpi_title = lv_label_create(kpi_card);
+    lv_label_set_text(kpi_title, "КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ");
+    lv_obj_set_style_text_color(kpi_title, ui_token_text_muted(), 0);
+    lv_obj_set_style_text_font(kpi_title, UI_FONT_XS, 0);
+    lv_obj_set_style_pad_bottom(kpi_title, UI_GAP_XS, 0);
+
+    w->kpi_p3     = create_kpi_row(kpi_card, "P3 (1-я ст.)",      "bar");
+    w->kpi_p4     = create_kpi_row(kpi_card, "P4 (2-я ст.)",      "bar");
+    w->kpi_sigma3 = create_kpi_row(kpi_card, "\xCF\x83" "3 пермеат", "uS/cm");
+    w->kpi_q3     = create_kpi_row(kpi_card, "Q3 пермеат",        "m3/h");
+    w->kpi_temp   = create_kpi_row(kpi_card, "Температура",       "°C");
+    w->kpi_sigma1 = create_kpi_row(kpi_card, "\xCF\x83" "1 питание",  "uS/cm");
+
+    /* ─── Control card ────────────────────────────────────────────── */
+    lv_obj_t *ctrl_card = lv_obj_create(col);
+    lv_obj_set_size(ctrl_card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(ctrl_card, ui_token_bg_card(), 0);
+    lv_obj_set_style_bg_opa(ctrl_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(ctrl_card, ui_token_border(), 0);
+    lv_obj_set_style_border_width(ctrl_card, 1, 0);
+    lv_obj_set_style_radius(ctrl_card, UI_RADIUS_LG, 0);
+    lv_obj_set_style_pad_all(ctrl_card, UI_GAP_MD, 0);
+    lv_obj_set_flex_flow(ctrl_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(ctrl_card, UI_GAP_SM, 0);
+    lv_obj_remove_flag(ctrl_card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *ctrl_title = lv_label_create(ctrl_card);
+    lv_label_set_text(ctrl_title, "УПРАВЛЕНИЕ");
+    lv_obj_set_style_text_color(ctrl_title, ui_token_text_muted(), 0);
+    lv_obj_set_style_text_font(ctrl_title, UI_FONT_XS, 0);
+    lv_obj_set_style_pad_bottom(ctrl_title, UI_GAP_XS, 0);
+
+    /* Большая зелёная "Пуск AUTO". */
+    create_panel_btn(ctrl_card, "Пуск AUTO",
+                     ui_token_accent(), ui_token_text_inverse(),
+                     60, ui_evt_start_auto);
+
+    /* "Ручной режим" — обычная высота. */
+    create_panel_btn(ctrl_card, "Ручной режим",
+                     ui_token_accent(), ui_token_text_inverse(),
+                     40, ui_evt_set_manual);
+
+    /* Row: Стоп (danger) + Промывка (secondary). */
+    lv_obj_t *row = lv_obj_create(ctrl_card);
+    lv_obj_set_size(row, LV_PCT(100), 40);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, UI_GAP_SM, 0);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *btn_stop = lv_button_create(row);
+    lv_obj_set_size(btn_stop, LV_PCT(48), 40);
+    lv_obj_set_style_bg_color(btn_stop, ui_token_danger(), 0);
+    lv_obj_set_style_radius(btn_stop, UI_RADIUS_MD, 0);
+    lv_obj_set_style_shadow_width(btn_stop, 0, 0);
+    lv_obj_set_style_border_width(btn_stop, 0, 0);
+    lv_obj_add_event_cb(btn_stop, ui_evt_stop, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l_stop = lv_label_create(btn_stop);
+    lv_label_set_text(l_stop, "Стоп");
+    lv_obj_set_style_text_color(l_stop, ui_token_text_inverse(), 0);
+    lv_obj_set_style_text_font(l_stop, UI_FONT_MD, 0);
+    lv_obj_center(l_stop);
+
+    lv_obj_t *btn_wash = lv_button_create(row);
+    lv_obj_set_size(btn_wash, LV_PCT(48), 40);
+    lv_obj_set_style_bg_color(btn_wash, ui_token_bg_mute(), 0);
+    lv_obj_set_style_radius(btn_wash, UI_RADIUS_MD, 0);
+    lv_obj_set_style_shadow_width(btn_wash, 0, 0);
+    lv_obj_set_style_border_color(btn_wash, ui_token_border(), 0);
+    lv_obj_set_style_border_width(btn_wash, 1, 0);
+    lv_obj_add_event_cb(btn_wash, ui_evt_start_washing, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l_wash = lv_label_create(btn_wash);
+    lv_label_set_text(l_wash, "Промывка");
+    lv_obj_set_style_text_color(l_wash, ui_token_text_primary(), 0);
+    lv_obj_set_style_text_font(l_wash, UI_FONT_MD, 0);
+    lv_obj_center(l_wash);
+
+    /* "Заглушить алярмы". */
+    create_panel_btn(ctrl_card, "Заглушить алярмы",
+                     ui_token_bg_mute(), ui_token_text_primary(),
+                     40, ui_evt_reset_fault);
+}
+
 /* ─── собрать мнемосхему по координатам прототипа ─────────────────── */
 
 lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
@@ -130,14 +339,19 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Контейнер для мнемо — центрируется горизонтально (letterbox 52px по бокам). */
+    /* Контейнер для мнемо — в left area (924 px wide), центрирован.
+     * Right panel (KPI + Control) занимает 320 px справа. */
+    int canvas_x = PAGE_PAD + (LEFT_AREA_W - MNEMO_PX_W) / 2;
+    int canvas_y = PAGE_PAD + (LEFT_AREA_H - MNEMO_PX_H) / 2;
+
     lv_obj_t *canvas = lv_obj_create(root);
     lv_obj_set_size(canvas, MNEMO_PX_W, MNEMO_PX_H);
-    lv_obj_set_pos(canvas, (UI_SCREEN_W - MNEMO_PX_W) / 2, 0);
+    lv_obj_set_pos(canvas, canvas_x, canvas_y);
     lv_obj_set_style_bg_color(canvas, ui_token_bg_card(), 0);
     lv_obj_set_style_bg_opa(canvas, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(canvas, 0, 0);
-    lv_obj_set_style_radius(canvas, 0, 0);
+    lv_obj_set_style_border_color(canvas, ui_token_border(), 0);
+    lv_obj_set_style_border_width(canvas, 1, 0);
+    lv_obj_set_style_radius(canvas, UI_RADIUS_LG, 0);
     lv_obj_set_style_pad_all(canvas, 0, 0);
     lv_obj_remove_flag(canvas, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -396,6 +610,9 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     ui_sensor_set_click_cb(w->s_sigma2, on_sensor_click);
     ui_sensor_set_click_cb(w->s_sigma3, on_sensor_click);
 
+    /* ═══ ПРАВАЯ ПАНЕЛЬ: KPI + Controls ════════════════════════════ */
+    create_right_panel(root, w);
+
     return root;
 }
 
@@ -413,6 +630,16 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *data, uint32_t
         update_sensor_value(w->s_p2, data->pressure[1].value, 1);
         update_sensor_value(w->s_p3, data->pressure[2].value, 1);
         update_sensor_value(w->s_p4, data->pressure[3].value, 1);
+
+        /* KPI: P3 и P4 — те же значения с состоянием по уставкам. */
+        update_kpi_value(w->kpi_p3, data->pressure[2].value, 1, "bar",
+            classify_color(data->pressure[2].value, 32, 35));
+        update_kpi_value(w->kpi_p4, data->pressure[3].value, 1, "bar",
+            classify_color(data->pressure[3].value, 7.5f, 8.0f));
+
+        /* Температура (data->temperature.value). */
+        update_kpi_value(w->kpi_temp, data->temperature.value, 1, "°C",
+            classify_color(data->temperature.value, 30, 35));
     }
 
     /* Расходомеры. */
@@ -421,12 +648,23 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *data, uint32_t
         update_sensor_value(w->s_q2, data->flow[1].flow, 2);
         update_sensor_value(w->s_q3, data->flow[2].flow, 2);
         update_sensor_value(w->s_q4, data->flow[3].flow, 2);
+
+        /* KPI: Q3 — расход товарного пермеата. */
+        update_kpi_value(w->kpi_q3, data->flow[2].flow, 2, "m3/h",
+            ui_token_accent());  /* без warn/alarm — informational */
     }
 
     /* Кондуктометры (s2 = PERM1 = σ2, s3 = PERM2 = σ3). */
     if (dirty & DIRTY_CONDUCTIVITY) {
         update_sensor_value(w->s_sigma2, data->conductivity[1].conductivity, 1);
         update_sensor_value(w->s_sigma3, data->conductivity[2].conductivity, 1);
+
+        /* KPI: σ3 — проводимость товарного пермеата (важный показатель),
+         * σ1 — проводимость питательной воды (контекст). */
+        update_kpi_value(w->kpi_sigma3, data->conductivity[2].conductivity, 1, "uS/cm",
+            classify_color(data->conductivity[2].conductivity, 5, 10));
+        update_kpi_value(w->kpi_sigma1, data->conductivity[0].conductivity, 0, "uS/cm",
+            ui_token_text_secondary());  /* informational */
     }
 
     /* IO: поплавки уровня + статус насосов + уровень воды в ёмкостях.
