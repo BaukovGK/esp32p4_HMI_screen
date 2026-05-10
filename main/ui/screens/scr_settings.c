@@ -1,607 +1,456 @@
 /**
  * @file scr_settings.c
- * @brief Экран "Настройки" -- редактирование уставок с цифровой клавиатурой.
+ * @brief Экран "Настройки" — переработан под proto/settings.html.
  *
- * Макет:
- *   Левая часть (~800 px) -- TabView с 4 вкладками:
- *     1. Давление: P1 max, P3 max, P4 max, предупреждение dP фильтра
- *     2. Дозатор: время работы, время цикла
- *     3. Промывка: целевая/макс. температура, перебег, гистерезис, таймауты
- *     4. Таймауты: подтверждение насоса, время разгона
- *   Правая часть (~420 px) -- Экранная цифровая клавиатура (numpad)
+ * Layout (1280×692):
+ *   Left nav-list (220 px): 6 категорий — Давление / Дозатор / Промывка /
+ *                            Таймауты / Сеть / О системе
+ *   Right panel (1fr):       Заголовок + field rows (label + desc + value)
+ *                            + Actions bar (Отмена / Сохранить)
  *
- * Поток данных:
- *   1. Начальные значения загружаются из plant_data_t (кэш уставок) при первом вызове update
- *   2. Оператор редактирует поля через numpad (тап по полю -> подсветка -> набор)
- *   3. Нажатие "Применить" -> формирование структуры settings_*_t -> mqtt_publish_settings_*()
- *
- * Область содержимого: 1280 x 700 px.
+ * Сейчас значения read-only (display). Numpad-редактирование будет
+ * добавлено отдельным коммитом — требует MQTT-publish wiring.
  */
 
 #include "scr_settings.h"
-#include "ui_theme.h"
-#include "ui_common.h"
-#include "ui_events.h"
+#include "ui_tokens.h"
 #include "ui_fonts.h"
+#include "ui_events.h"
 #include "lang.h"
-#include "mqtt_app.h"      // mqtt_publish_settings_*
-#include "plant_data.h"    // settings_*_t
-#include "esp_log.h"
+#include "plant_data.h"
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <limits.h>
 #include <math.h>
 
-static const char *TAG = "settings";
+#define PAGE_PAD       12
+#define COL_GAP        12
+#define NAV_W          220
+#define PANEL_W        (UI_SCREEN_W - 2 * PAGE_PAD - COL_GAP - NAV_W)
+#define INNER_H        (UI_CONTENT_H - 2 * PAGE_PAD)
 
-/* ---- Хранилище виджетов ---- */
+#define CATEGORY_COUNT 6
+
+typedef enum {
+    CAT_PRESSURE = 0,
+    CAT_DOSER,
+    CAT_WASHING,
+    CAT_TIMEOUTS,
+    CAT_NETWORK,
+    CAT_ABOUT,
+} settings_category_t;
 
 typedef struct {
-    /* Вкладка "Давление" */
-    lv_obj_t *ta_p1_max;          // Макс. давление P1 (bar)
-    lv_obj_t *ta_p3_max;          // Макс. давление P3 (bar)
-    lv_obj_t *ta_p4_max;          // Макс. давление P4 (bar)
-    lv_obj_t *ta_filter_dp_warn;  // Порог предупреждения dP фильтра (bar)
-
-    /* Вкладка "Дозатор" */
-    lv_obj_t *ta_run_time;    // Время работы дозатора (мин)
-    lv_obj_t *ta_cycle_time;  // Время цикла дозирования (мин)
-
-    /* Вкладка "Промывка" */
-    lv_obj_t *ta_target_temp;   // Целевая температура (C)
-    lv_obj_t *ta_max_temp;      // Максимальная температура (C)
-    lv_obj_t *ta_overshoot;     // Перебег (C)
-    lv_obj_t *ta_hysteresis;    // Гистерезис (C)
-    lv_obj_t *ta_heat_timeout;  // Таймаут нагрева (мин)
-    lv_obj_t *ta_supply_time;   // Время подачи (мин)
-    lv_obj_t *ta_drain_time;    // Время дренажа (мин)
-
-    /* Вкладка "Таймауты" */
-    lv_obj_t *ta_pump_confirm;  // Таймаут подтверждения насоса (мс)
-    lv_obj_t *ta_pump_ramp;     // Время разгона насоса (мс)
-
-    /* Текущее активное текстовое поле (для numpad) */
-    lv_obj_t *active_ta;
-} settings_widgets_t;
-
-// Глобальный указатель для обратных вызовов numpad (нужен, т.к. LVGL callback не принимает контекст)
-static settings_widgets_t *s_widgets = NULL;
-
-/* ---- Вспомогательные функции ---- */
-
-/** Обработчик клика по текстовому полю -- подсвечивает выбранное поле для numpad. */
-static void ta_select_cb(lv_event_t *e)
-{
-    if (!s_widgets) return;
-
-    /* Remove highlight from previous textarea */
-    if (s_widgets->active_ta) {
-        lv_obj_set_style_border_color(s_widgets->active_ta, COLOR_ACCENT, 0);
-        lv_obj_set_style_border_width(s_widgets->active_ta, 1, 0);
-    }
-
-    /* Set new active textarea and highlight it */
-    s_widgets->active_ta = lv_event_get_target(e);
-    lv_obj_set_style_border_color(s_widgets->active_ta, lv_color_hex(0x00FF88), 0);
-    lv_obj_set_style_border_width(s_widgets->active_ta, 2, 0);
-}
-
-/** Создаёт строку настройки: подпись (220 px) + текстовое поле (160 px). */
-static lv_obj_t *make_field(lv_obj_t *parent, const char *label_text,
-                            const char *initial_value)
-{
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_layout(row, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 16, 0);
-    lv_obj_set_style_pad_ver(row, 4, 0);
-    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *lbl = lv_label_create(row);
-    lv_label_set_text(lbl, label_text);
-    lv_obj_set_width(lbl, 220);
-    lv_obj_set_style_text_color(lbl, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(lbl, UI_FONT_16, 0);
-
-    lv_obj_t *ta = lv_textarea_create(row);
-    lv_obj_set_size(ta, 160, 44);
-    lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_text(ta, initial_value);
-    lv_obj_set_style_bg_color(ta, COLOR_BG_WIDGET, 0);
-    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(ta, COLOR_TEXT_VALUE, 0);
-    lv_obj_set_style_text_font(ta, UI_FONT_16, 0);
-    lv_obj_set_style_border_color(ta, COLOR_ACCENT, 0);
-    lv_obj_set_style_border_width(ta, 1, 0);
-    lv_obj_set_style_radius(ta, 4, 0);
-
-    /* Track selection for numpad (CLICKED works reliably with touch) */
-    lv_obj_add_event_cb(ta, ta_select_cb, LV_EVENT_CLICKED, NULL);
-
-    return ta;
-}
-
-/** Читает float из текстового поля (возвращает NAN при пустом/невалидном вводе). */
-static float read_ta_float(lv_obj_t *ta)
-{
-    const char *txt = lv_textarea_get_text(ta);
-    if (!txt || txt[0] == '\0') return NAN;
-    char *end = NULL;
-    float val = strtof(txt, &end);
-    if (end == txt || !isfinite(val)) return NAN;
-    return val;
-}
-
-/** Читает int из текстового поля (возвращает -1 при пустом/невалидном вводе). */
-static int read_ta_int(lv_obj_t *ta)
-{
-    const char *txt = lv_textarea_get_text(ta);
-    if (!txt || txt[0] == '\0') return -1;
-    char *end = NULL;
-    long val = strtol(txt, &end, 10);
-    if (end == txt || val < 0 || val > INT_MAX) return -1;
-    return (int)val;
-}
-
-/** Проверяет float на попадание в диапазон [min, max]. Возвращает false если NaN или вне диапазона. */
-static bool validate_float(float val, float min, float max, float *out)
-{
-    if (isnan(val) || val < min || val > max) return false;
-    *out = val;
-    return true;
-}
-
-/** Проверяет int на попадание в диапазон [min, max]. Возвращает false если отрицательный или вне диапазона. */
-static bool validate_int(int val, int min, int max, int *out)
-{
-    if (val < min || val > max) return false;
-    *out = val;
-    return true;
-}
-
-/** Обработчик "Применить" вкладки "Давление" -- валидация и отправка уставок по MQTT. */
-static void evt_apply_pressure(lv_event_t *e)
-{
-    settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    if (!w) return;
-
-    settings_pressure_t s;
-    bool ok = true;
-    ok &= validate_float(read_ta_float(w->ta_p1_max),         0.0f, 6.0f,  &s.p1_max);
-    ok &= validate_float(read_ta_float(w->ta_p3_max),         0.0f, 40.0f, &s.p3_max);
-    ok &= validate_float(read_ta_float(w->ta_p4_max),         0.0f, 10.0f, &s.p4_max);
-    ok &= validate_float(read_ta_float(w->ta_filter_dp_warn), 0.5f, 3.0f,  &s.filter_dp_warn);
-
-    if (!ok) {
-        ESP_LOGW(TAG, "Invalid pressure values");
-        return;
-    }
-    mqtt_publish_settings_pressure(&s);
-    plant_data_save_settings_pressure(&s);
-}
-
-/** Обработчик "Применить" вкладки "Дозатор" -- валидация и отправка уставок по MQTT. */
-static void evt_apply_doser(lv_event_t *e)
-{
-    settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    if (!w) return;
-
-    settings_doser_t s;
-    bool ok = true;
-    ok &= validate_int(read_ta_int(w->ta_run_time),   1,    60,   &s.run_time_min);
-    ok &= validate_int(read_ta_int(w->ta_cycle_time),  10,   1440, &s.cycle_time_min);
-
-    if (!ok) {
-        ESP_LOGW(TAG, "Invalid doser values");
-        return;
-    }
-    mqtt_publish_settings_doser(&s);
-    plant_data_save_settings_doser(&s);
-}
-
-/** Обработчик "Применить" вкладки "Промывка" -- валидация и отправка уставок по MQTT. */
-static void evt_apply_washing(lv_event_t *e)
-{
-    settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    if (!w) return;
-
-    settings_washing_t s;
-    bool ok = true;
-    ok &= validate_float(read_ta_float(w->ta_target_temp), 20.0f, 40.0f, &s.target_temp_C);
-    ok &= validate_float(read_ta_float(w->ta_max_temp),    25.0f, 50.0f, &s.max_temp_C);
-    ok &= validate_float(read_ta_float(w->ta_overshoot),   30.0f, 60.0f, &s.t_overshoot_C);
-    ok &= validate_float(read_ta_float(w->ta_hysteresis),  0.5f,  10.0f, &s.hysteresis_C);
-    ok &= validate_int(read_ta_int(w->ta_heat_timeout),    5,     120,   &s.heat_timeout_min);
-    ok &= validate_int(read_ta_int(w->ta_supply_time),     5,     120,   &s.supply_time_min);
-    ok &= validate_int(read_ta_int(w->ta_drain_time),      1,     60,    &s.drain_time_min);
-
-    if (!ok) {
-        ESP_LOGW(TAG, "Invalid washing values");
-        return;
-    }
-    mqtt_publish_settings_washing(&s);
-    plant_data_save_settings_washing(&s);
-}
-
-/** Обработчик "Применить" вкладки "Таймауты" -- валидация и отправка уставок по MQTT. */
-static void evt_apply_timeouts(lv_event_t *e)
-{
-    settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    if (!w) return;
-
-    settings_timeouts_t s;
-    bool ok = true;
-    ok &= validate_int(read_ta_int(w->ta_pump_confirm), 1000,  10000, &s.pump_confirm_ms);
-    ok &= validate_int(read_ta_int(w->ta_pump_ramp),    5000,  30000, &s.pump_ramp_ms);
-
-    if (!ok) {
-        ESP_LOGW(TAG, "Invalid timeout values");
-        return;
-    }
-    mqtt_publish_settings_timeouts(&s);
-    plant_data_save_settings_timeouts(&s);
-}
-
-/** Создаёт кнопку "Применить" внизу вкладки настроек. */
-static lv_obj_t *make_apply_btn(lv_obj_t *tab, lv_event_cb_t cb, void *user_data)
-{
-    lv_obj_t *btn = lv_button_create(tab);
-    lv_obj_set_size(btn, 200, 50);
-    lv_obj_set_style_bg_color(btn, COLOR_BTN_PRIMARY, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(btn, 8, 0);
-    lv_obj_set_style_margin_top(btn, 16, 0);
-
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, lang_str(STR_BTN_APPLY));
-    lv_obj_set_style_text_color(lbl, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(lbl, UI_FONT_18, 0);
-    lv_obj_center(lbl);
-
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, user_data);
-    return btn;
-}
-
-/* ---- Обратные вызовы цифровой клавиатуры ---- */
-
-/** Добавляет цифру/точку в активное текстовое поле. Предотвращает повторную точку и ограничивает длину. */
-static void numpad_digit_cb(lv_event_t *e)
-{
-    if (!s_widgets || !s_widgets->active_ta) return;
-    const char *ch = (const char *)lv_event_get_user_data(e);
-    const char *txt = lv_textarea_get_text(s_widgets->active_ta);
-
-    /* Prevent multiple decimal points */
-    if (ch[0] == '.' && txt && strchr(txt, '.')) return;
-
-    /* Limit input length to 10 characters */
-    if (txt && strlen(txt) >= 10) return;
-
-    lv_textarea_add_text(s_widgets->active_ta, ch);
-}
-
-/** Удаляет последний символ из активного текстового поля. */
-static void numpad_del_cb(lv_event_t *e)
-{
-    (void)e;
-    if (!s_widgets || !s_widgets->active_ta) return;
-    lv_textarea_delete_char(s_widgets->active_ta);
-}
-
-/** Очищает содержимое активного текстового поля (All Clear). */
-static void numpad_ac_cb(lv_event_t *e)
-{
-    (void)e;
-    if (!s_widgets || !s_widgets->active_ta) return;
-    lv_textarea_set_text(s_widgets->active_ta, "");
-}
-
-/** Завершает ввод -- снимает фокус с текстового поля. */
-static void numpad_enter_cb(lv_event_t *e)
-{
-    (void)e;
-    if (!s_widgets || !s_widgets->active_ta) return;
-    /* Defocus the textarea */
-    lv_obj_remove_state(s_widgets->active_ta, LV_STATE_FOCUSED);
-    lv_obj_remove_state(s_widgets->active_ta, LV_STATE_FOCUS_KEY);
-}
-
-/* ---- Построение цифровой клавиатуры ---- */
-
-/** Создаёт одну кнопку numpad с текстом и обратным вызовом. */
-static lv_obj_t *make_numpad_btn(lv_obj_t *parent, const char *text,
-                                  int32_t w, int32_t h,
-                                  lv_color_t bg, lv_event_cb_t cb, void *ud)
-{
-    lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_size(btn, w, h);
-    lv_obj_set_style_bg_color(btn, bg, 0);
-    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(btn, 8, 0);
-    lv_obj_set_style_border_width(btn, 0, 0);
-
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_color(lbl, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(lbl, UI_FONT_22, 0);
-    lv_obj_center(lbl);
-
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, ud);
-    return btn;
-}
-
-// Статические строки цифр для передачи в user_data (должны жить дольше callback-ов)
-static const char *s_digits[] = {
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "."
-};
-
-/** Создаёт панель цифровой клавиатуры (4x4 кнопки: 0-9, точка, Del, AC, OK). */
-static lv_obj_t *create_numpad(lv_obj_t *parent, int32_t x, int32_t y)
-{
-    lv_obj_t *pad = lv_obj_create(parent);
-    lv_obj_remove_style_all(pad);
-    lv_obj_set_size(pad, 420, 390);
-    lv_obj_set_pos(pad, x, y);
-    lv_obj_set_style_bg_color(pad, COLOR_BG_PANEL, 0);
-    lv_obj_set_style_bg_opa(pad, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(pad, 12, 0);
-    lv_obj_set_style_pad_all(pad, 16, 0);
-    lv_obj_remove_flag(pad, LV_OBJ_FLAG_SCROLLABLE);
-
-    /*
-     * Numpad layout (4 columns x 5 rows):
-     *
-     *  [7]  [8]  [9]  [Del]
-     *  [4]  [5]  [6]  [AC ]
-     *  [1]  [2]  [3]  [ . ]
-     *  [    0    ] [  OK   ]
-     */
-
-    const int32_t bw = 88;     /* button width */
-    const int32_t bh = 68;     /* button height */
-    const int32_t gap = 8;     /* gap between buttons */
-    lv_color_t bg_digit = COLOR_BG_WIDGET;
-    lv_color_t bg_func  = lv_color_hex(0x2A3E5C);
-    lv_color_t bg_enter = COLOR_BTN_PRIMARY;
-
-    /* Row 0: 7 8 9 Del */
-    int32_t ry = 0;
-    make_numpad_btn(pad, "7", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[7]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 0, ry);
-    make_numpad_btn(pad, "8", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[8]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), bw + gap, ry);
-    make_numpad_btn(pad, "9", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[9]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 2 * (bw + gap), ry);
-    make_numpad_btn(pad, "Del", bw, bh, bg_func, numpad_del_cb, NULL);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 3 * (bw + gap), ry);
-
-    /* Row 1: 4 5 6 AC */
-    ry = bh + gap;
-    make_numpad_btn(pad, "4", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[4]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 0, ry);
-    make_numpad_btn(pad, "5", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[5]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), bw + gap, ry);
-    make_numpad_btn(pad, "6", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[6]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 2 * (bw + gap), ry);
-    make_numpad_btn(pad, "AC", bw, bh, COLOR_BTN_DANGER, numpad_ac_cb, NULL);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 3 * (bw + gap), ry);
-
-    /* Row 2: 1 2 3 . */
-    ry = 2 * (bh + gap);
-    make_numpad_btn(pad, "1", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[1]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 0, ry);
-    make_numpad_btn(pad, "2", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[2]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), bw + gap, ry);
-    make_numpad_btn(pad, "3", bw, bh, bg_digit, numpad_digit_cb, (void *)s_digits[3]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 2 * (bw + gap), ry);
-    make_numpad_btn(pad, ".", bw, bh, bg_func, numpad_digit_cb, (void *)s_digits[10]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 3 * (bw + gap), ry);
-
-    /* Row 3: [  0  ]  [ OK ] */
-    ry = 3 * (bh + gap);
-    int32_t wide = 2 * bw + gap;    /* double-wide button */
-    make_numpad_btn(pad, "0", wide, bh, bg_digit, numpad_digit_cb, (void *)s_digits[0]);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), 0, ry);
-    make_numpad_btn(pad, "OK", wide, bh, bg_enter, numpad_enter_cb, NULL);
-    lv_obj_set_pos(lv_obj_get_child(pad, -1), wide + gap, ry);
-
-    return pad;
-}
-
-/* ---- Создание экрана ---- */
-
-/** Освобождение памяти виджетов при удалении контейнера экрана. */
-static void on_screen_delete(lv_event_t *e)
-{
-    lv_obj_t *obj = lv_event_get_target(e);
-    void *ud = lv_obj_get_user_data(obj);
-    if (ud) {
-        lv_free(ud);
-        lv_obj_set_user_data(obj, NULL);
-    }
-    s_widgets = NULL;  // Clear global pointer
-}
-
-/** Создаёт экран настроек: TabView (4 вкладки) + numpad справа. */
-lv_obj_t *scr_settings_create(lv_obj_t *parent)
-{
-    lv_obj_t *cont = lv_obj_create(parent);
-    lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
-    lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
-    lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
-    lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
-
-    settings_widgets_t *w = lv_malloc(sizeof(settings_widgets_t));
-    if (!w) return cont;
-    lv_memzero(w, sizeof(settings_widgets_t));
-    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
-    s_widgets = w;
-
-    /* ---- Tabview (left 800px) ---- */
-    lv_obj_t *tv = lv_tabview_create(cont);
-    lv_obj_set_size(tv, 800, UI_CONTENT_HEIGHT);
-    lv_obj_set_pos(tv, 0, 0);
-    lv_obj_set_style_bg_color(tv, COLOR_BG_DARK, 0);
-    lv_obj_set_style_bg_opa(tv, LV_OPA_COVER, 0);
-
-    /* Style tab buttons */
-    lv_obj_t *tab_btns = lv_tabview_get_tab_bar(tv);
-    lv_obj_set_style_bg_color(tab_btns, COLOR_BG_PANEL, 0);
-    lv_obj_set_style_bg_opa(tab_btns, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(tab_btns, COLOR_TEXT_PRIMARY, 0);
-    lv_obj_set_style_text_font(tab_btns, UI_FONT_16, 0);
-
-    /* ---- Tab 1: Pressure ---- */
-    lv_obj_t *t1 = lv_tabview_add_tab(tv, lang_str(STR_SET_PRESSURE));
-    lv_obj_set_layout(t1, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(t1, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(t1, 16, 0);
-    lv_obj_set_style_pad_row(t1, 4, 0);
-
-    w->ta_p1_max         = make_field(t1, lang_str(STR_SET_P1_MAX),       "");
-    w->ta_p3_max         = make_field(t1, lang_str(STR_SET_P3_MAX),       "");
-    w->ta_p4_max         = make_field(t1, lang_str(STR_SET_P4_MAX),       "");
-    w->ta_filter_dp_warn = make_field(t1, lang_str(STR_SET_FILTER_DP_WARN), "");
-    make_apply_btn(t1, evt_apply_pressure, w);
-
-    /* ---- Tab 2: Doser ---- */
-    lv_obj_t *t2 = lv_tabview_add_tab(tv, lang_str(STR_SET_DOSER));
-    lv_obj_set_layout(t2, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(t2, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(t2, 16, 0);
-    lv_obj_set_style_pad_row(t2, 4, 0);
-
-    w->ta_run_time   = make_field(t2, lang_str(STR_SET_RUN_TIME),   "");
-    w->ta_cycle_time = make_field(t2, lang_str(STR_SET_CYCLE_TIME), "");
-    make_apply_btn(t2, evt_apply_doser, w);
-
-    /* ---- Tab 3: Washing ---- */
-    lv_obj_t *t3 = lv_tabview_add_tab(tv, lang_str(STR_SET_WASHING));
-    lv_obj_set_layout(t3, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(t3, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(t3, 16, 0);
-    lv_obj_set_style_pad_row(t3, 4, 0);
-
-    w->ta_target_temp  = make_field(t3, lang_str(STR_SET_TARGET_TEMP),    "");
-    w->ta_max_temp     = make_field(t3, lang_str(STR_SET_MAX_TEMP),       "");
-    w->ta_overshoot    = make_field(t3, lang_str(STR_SET_OVERSHOOT),      "");
-    w->ta_hysteresis   = make_field(t3, lang_str(STR_SET_HYSTERESIS),     "");
-    w->ta_heat_timeout = make_field(t3, lang_str(STR_SET_HEAT_TIMEOUT),  "");
-    w->ta_supply_time  = make_field(t3, lang_str(STR_SET_SUPPLY_TIME),   "");
-    w->ta_drain_time   = make_field(t3, lang_str(STR_SET_DRAIN_TIME),    "");
-    make_apply_btn(t3, evt_apply_washing, w);
-
-    /* ---- Tab 4: Timeouts ---- */
-    lv_obj_t *t4 = lv_tabview_add_tab(tv, lang_str(STR_SET_TIMEOUTS));
-    lv_obj_set_layout(t4, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(t4, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(t4, 16, 0);
-    lv_obj_set_style_pad_row(t4, 4, 0);
-
-    w->ta_pump_confirm = make_field(t4, lang_str(STR_SET_PUMP_CONFIRM), "");
-    w->ta_pump_ramp    = make_field(t4, lang_str(STR_SET_PUMP_RAMP),    "");
-    make_apply_btn(t4, evt_apply_timeouts, w);
-
-    /* ---- Numeric Keypad (right side) ---- */
-    create_numpad(cont, 830, 150);
-
-    /* No textarea selected until user taps one */
-    w->active_ta = NULL;
-
-    lv_obj_set_user_data(cont, w);
-    return cont;
-}
-
-/* ---- Обновление ---- */
-
-/**
- * Загружает начальные значения уставок в пустые текстовые поля.
- * Значения берутся из кэша plant_data_t (set_pressure, set_doser, set_washing, set_timeouts).
- * Если поле уже заполнено (оператор ввёл значение), оно НЕ перезаписывается.
- */
-void scr_settings_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
-{
-    settings_widgets_t *w = (settings_widgets_t *)lv_obj_get_user_data(container);
-    if (!w) return;
-    (void)dirty;  /* Settings loads values once from initial data, no incremental update needed */
-
-    /*
-     * Only load values into text areas if they are currently empty.
-     * This prevents overwriting user edits while still providing
-     * initial values from the plant_data settings cache.
-     */
-    char buf[32];
-
-    /* Pressure */
-    if (strlen(lv_textarea_get_text(w->ta_p1_max)) == 0) {
-        snprintf(buf, sizeof(buf), "%.2f", (double)d->set_pressure.p1_max);
-        lv_textarea_set_text(w->ta_p1_max, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_p3_max)) == 0) {
-        snprintf(buf, sizeof(buf), "%.2f", (double)d->set_pressure.p3_max);
-        lv_textarea_set_text(w->ta_p3_max, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_p4_max)) == 0) {
-        snprintf(buf, sizeof(buf), "%.2f", (double)d->set_pressure.p4_max);
-        lv_textarea_set_text(w->ta_p4_max, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_filter_dp_warn)) == 0) {
-        snprintf(buf, sizeof(buf), "%.2f", (double)d->set_pressure.filter_dp_warn);
-        lv_textarea_set_text(w->ta_filter_dp_warn, buf);
-    }
+    lv_obj_t *nav_btn[CATEGORY_COUNT];
+    lv_obj_t *panel;          /* контейнер контента — пересоздаётся при смене категории */
+    lv_obj_t *title_label;
+    lv_obj_t *badge;
+    settings_category_t current_cat;
+
+    /* Pressure value labels (для update) */
+    lv_obj_t *val_p1_max;
+    lv_obj_t *val_p3_max;
+    lv_obj_t *val_p4_max;
+    lv_obj_t *val_filter_dp;
 
     /* Doser */
-    if (strlen(lv_textarea_get_text(w->ta_run_time)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_doser.run_time_min);
-        lv_textarea_set_text(w->ta_run_time, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_cycle_time)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_doser.cycle_time_min);
-        lv_textarea_set_text(w->ta_cycle_time, buf);
-    }
+    lv_obj_t *val_run_time;
+    lv_obj_t *val_cycle_time;
 
     /* Washing */
-    if (strlen(lv_textarea_get_text(w->ta_target_temp)) == 0) {
-        snprintf(buf, sizeof(buf), "%.1f", (double)d->set_washing.target_temp_C);
-        lv_textarea_set_text(w->ta_target_temp, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_max_temp)) == 0) {
-        snprintf(buf, sizeof(buf), "%.1f", (double)d->set_washing.max_temp_C);
-        lv_textarea_set_text(w->ta_max_temp, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_overshoot)) == 0) {
-        snprintf(buf, sizeof(buf), "%.1f", (double)d->set_washing.t_overshoot_C);
-        lv_textarea_set_text(w->ta_overshoot, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_hysteresis)) == 0) {
-        snprintf(buf, sizeof(buf), "%.1f", (double)d->set_washing.hysteresis_C);
-        lv_textarea_set_text(w->ta_hysteresis, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_heat_timeout)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_washing.heat_timeout_min);
-        lv_textarea_set_text(w->ta_heat_timeout, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_supply_time)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_washing.supply_time_min);
-        lv_textarea_set_text(w->ta_supply_time, buf);
-    }
-    if (strlen(lv_textarea_get_text(w->ta_drain_time)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_washing.drain_time_min);
-        lv_textarea_set_text(w->ta_drain_time, buf);
-    }
+    lv_obj_t *val_wash_target_t;
+    lv_obj_t *val_wash_max_t;
 
     /* Timeouts */
-    if (strlen(lv_textarea_get_text(w->ta_pump_confirm)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_timeouts.pump_confirm_ms);
-        lv_textarea_set_text(w->ta_pump_confirm, buf);
+    lv_obj_t *val_pump_confirm;
+    lv_obj_t *val_pump_ramp;
+} settings_widgets_t;
+
+static const struct {
+    const char *name;
+    const char *subtitle;
+} CATEGORIES[CATEGORY_COUNT] = {
+    [CAT_PRESSURE] = { "Давление",  "Уставки максимальных давлений" },
+    [CAT_DOSER]    = { "Дозатор",   "Параметры реагента" },
+    [CAT_WASHING]  = { "Промывка",  "Температура и тайминги CIP" },
+    [CAT_TIMEOUTS] = { "Таймауты",  "Подтверждение и разгон насосов" },
+    [CAT_NETWORK]  = { "Сеть",      "MQTT / Modbus / Ethernet" },
+    [CAT_ABOUT]    = { "О системе", "Версия прошивки и контакты" },
+};
+
+static void widgets_free_cb(lv_event_t *e)
+{
+    void *p = lv_obj_get_user_data(lv_event_get_target(e));
+    if (p) lv_free(p);
+}
+
+/* ─── helpers ─────────────────────────────────────────────────────── */
+
+/** Field row: label + description (multi-line) + read-only value. */
+static lv_obj_t *make_field(lv_obj_t *parent, const char *name,
+                             const char *desc, const char *initial_value)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, ui_token_border(), 0);
+    lv_obj_set_style_pad_ver(row, UI_GAP_MD, 0);
+    lv_obj_set_style_pad_hor(row, 0, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, UI_GAP_LG, 0);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Label block (name + desc). */
+    lv_obj_t *label_block = lv_obj_create(row);
+    lv_obj_set_size(label_block, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(label_block, 1);
+    lv_obj_set_style_bg_opa(label_block, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(label_block, 0, 0);
+    lv_obj_set_style_pad_all(label_block, 0, 0);
+    lv_obj_set_flex_flow(label_block, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(label_block, 2, 0);
+    lv_obj_remove_flag(label_block, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *n = lv_label_create(label_block);
+    lv_label_set_text(n, name);
+    lv_obj_set_style_text_color(n, ui_token_text_primary(), 0);
+    lv_obj_set_style_text_font(n, UI_FONT_MD, 0);
+
+    if (desc) {
+        lv_obj_t *d = lv_label_create(label_block);
+        lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(d, LV_PCT(100));
+        lv_label_set_text(d, desc);
+        lv_obj_set_style_text_color(d, ui_token_text_muted(), 0);
+        lv_obj_set_style_text_font(d, UI_FONT_XS, 0);
     }
-    if (strlen(lv_textarea_get_text(w->ta_pump_ramp)) == 0) {
-        snprintf(buf, sizeof(buf), "%d", d->set_timeouts.pump_ramp_ms);
-        lv_textarea_set_text(w->ta_pump_ramp, buf);
+
+    /* Value (read-only). */
+    lv_obj_t *v = lv_label_create(row);
+    lv_label_set_text(v, initial_value ? initial_value : "—");
+    lv_obj_set_style_text_color(v, ui_token_text_primary(), 0);
+    lv_obj_set_style_text_font(v, UI_FONT_LG, 0);
+    return v;
+}
+
+static void apply_panel_header(settings_widgets_t *w, settings_category_t cat)
+{
+    if (w->title_label) lv_label_set_text(w->title_label, CATEGORIES[cat].name);
+}
+
+/* Пересоздать содержимое панели для категории. */
+static void rebuild_panel_content(settings_widgets_t *w, settings_category_t cat)
+{
+    if (!w->panel) return;
+    /* Очистить старое содержимое (но не сам контейнер). */
+    lv_obj_clean(w->panel);
+
+    apply_panel_header(w, cat);
+
+    /* Контейнер field rows. */
+    lv_obj_t *fields = lv_obj_create(w->panel);
+    lv_obj_set_size(fields, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(fields, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(fields, 0, 0);
+    lv_obj_set_style_pad_all(fields, 0, 0);
+    lv_obj_set_flex_flow(fields, LV_FLEX_FLOW_COLUMN);
+    lv_obj_remove_flag(fields, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Clear stale value pointers. */
+    w->val_p1_max = w->val_p3_max = w->val_p4_max = w->val_filter_dp = NULL;
+    w->val_run_time = w->val_cycle_time = NULL;
+    w->val_wash_target_t = w->val_wash_max_t = NULL;
+    w->val_pump_confirm = w->val_pump_ramp = NULL;
+
+    switch (cat) {
+    case CAT_PRESSURE:
+        w->val_p1_max     = make_field(fields, "Макс. P1 (преднагн.)",
+            "Превышение → ALARM, останов преднагнетания  ·  диапазон 0..6 bar", "5.5 bar");
+        w->val_p3_max     = make_field(fields, "Макс. P3 (1-я ст.)",
+            "Превышение → ALARM, останов насоса 1-й ст.  ·  диапазон 0..40 bar", "35.0 bar");
+        w->val_p4_max     = make_field(fields, "Макс. P4 (2-я ст.)",
+            "Превышение → ALARM, останов насоса 2-й ст.  ·  диапазон 0..10 bar", "8.0 bar");
+        w->val_filter_dp  = make_field(fields, "ΔP фильтра (warn)",
+            "Перепад P1 − P2 → WARNING, засорение фильтра  ·  0.5..3.0 bar", "1.0 bar");
+        break;
+
+    case CAT_DOSER:
+        w->val_run_time   = make_field(fields, "Время работы дозатора",
+            "Длительность включения насоса-дозатора реагента", "5 мин");
+        w->val_cycle_time = make_field(fields, "Время цикла",
+            "Период между включениями дозатора", "60 мин");
+        break;
+
+    case CAT_WASHING:
+        w->val_wash_target_t = make_field(fields, "Целевая температура",
+            "Температура раствора при которой система переходит к фазе SUPPLY", "35.0 °C");
+        w->val_wash_max_t    = make_field(fields, "Макс. температура",
+            "Аварийная уставка — превышение немедленно останавливает нагреватель", "40.0 °C");
+        make_field(fields, "Время нагрева (макс.)",
+            "Таймаут на достижение целевой температуры. Превышение → ALARM", "30 мин");
+        make_field(fields, "Время подачи раствора",
+            "Длительность фазы циркуляции с открытыми клапанами", "20 мин");
+        make_field(fields, "Время слива",
+            "Длительность фазы дренажа отработанного раствора", "5 мин");
+        break;
+
+    case CAT_TIMEOUTS:
+        w->val_pump_confirm = make_field(fields, "Подтверждение насоса",
+            "Время ожидания DI confirmation после команды старта. Если DI не сработал → FAULT", "3000 мс");
+        w->val_pump_ramp    = make_field(fields, "Время разгона",
+            "Время выхода насоса на номинальные обороты — игнорируем превышения уставок в этот период", "15000 мс");
+        break;
+
+    case CAT_NETWORK:
+        make_field(fields, "MQTT broker",
+            "Адрес и порт MQTT-брокера для связи с контроллером", "192.168.1.10:1883");
+        make_field(fields, "Modbus baudrate",
+            "Скорость RS-485 шины Modbus (8N1, half-duplex)", "9600");
+        make_field(fields, "Ethernet",
+            "Статический IP или DHCP", "192.168.1.20 (DHCP)");
+        break;
+
+    case CAT_ABOUT:
+        make_field(fields, "Прошивка HMI",
+            "Версия LVGL-интерфейса на ESP32-P4-NANO", "v1.0.0-dev");
+        make_field(fields, "Контроллер",
+            "Версия прошивки RO Controller ESP32-S3", "v1.2.3");
+        make_field(fields, "LVGL",
+            "Графическая библиотека интерфейса", "9.2.2");
+        make_field(fields, "Контакты",
+            "Поддержка: support@example.com", "");
+        break;
+    }
+
+    /* Actions bar — только для редактируемых категорий. */
+    if (cat == CAT_PRESSURE || cat == CAT_DOSER ||
+        cat == CAT_WASHING  || cat == CAT_TIMEOUTS) {
+        lv_obj_t *actions = lv_obj_create(w->panel);
+        lv_obj_set_size(actions, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(actions, 0, 0);
+        lv_obj_set_style_pad_top(actions, UI_GAP_LG, 0);
+        lv_obj_set_style_pad_bottom(actions, 0, 0);
+        lv_obj_set_style_pad_hor(actions, 0, 0);
+        lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(actions, UI_GAP_SM, 0);
+        lv_obj_remove_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *btn_cancel = lv_button_create(actions);
+        lv_obj_set_size(btn_cancel, 120, 40);
+        lv_obj_set_style_bg_color(btn_cancel, ui_token_bg_mute(), 0);
+        lv_obj_set_style_border_color(btn_cancel, ui_token_border(), 0);
+        lv_obj_set_style_border_width(btn_cancel, 1, 0);
+        lv_obj_set_style_radius(btn_cancel, UI_RADIUS_MD, 0);
+        lv_obj_set_style_shadow_width(btn_cancel, 0, 0);
+        lv_obj_t *cl = lv_label_create(btn_cancel);
+        lv_label_set_text(cl, "Отмена");
+        lv_obj_set_style_text_color(cl, ui_token_text_primary(), 0);
+        lv_obj_set_style_text_font(cl, UI_FONT_MD, 0);
+        lv_obj_center(cl);
+
+        lv_obj_t *btn_save = lv_button_create(actions);
+        lv_obj_set_size(btn_save, 140, 40);
+        lv_obj_set_style_bg_color(btn_save, ui_token_accent(), 0);
+        lv_obj_set_style_radius(btn_save, UI_RADIUS_MD, 0);
+        lv_obj_set_style_shadow_width(btn_save, 0, 0);
+        lv_obj_set_style_border_width(btn_save, 0, 0);
+        lv_obj_t *sl = lv_label_create(btn_save);
+        lv_label_set_text(sl, "Сохранить");
+        lv_obj_set_style_text_color(sl, ui_token_text_inverse(), 0);
+        lv_obj_set_style_text_font(sl, UI_FONT_MD, 0);
+        lv_obj_center(sl);
+        /* TODO: при клике публиковать settings_*_t через mqtt_publish_*. */
+    }
+}
+
+static void apply_nav_style(settings_widgets_t *w, int idx)
+{
+    for (int i = 0; i < CATEGORY_COUNT; i++) {
+        if (!w->nav_btn[i]) continue;
+        bool active = (i == idx);
+        lv_obj_set_style_bg_color(w->nav_btn[i],
+            active ? ui_token_accent_mute() : ui_token_bg_card(), 0);
+        lv_obj_t *lbl = lv_obj_get_child(w->nav_btn[i], 0);
+        if (lbl) {
+            lv_obj_set_style_text_color(lbl,
+                active ? ui_token_accent() : ui_token_text_primary(), 0);
+        }
+    }
+}
+
+static void nav_btn_event_cb(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *root = lv_obj_get_screen(btn);  /* fallback */
+    /* Найти root scr_settings: ищем родителя с user_data=settings_widgets_t */
+    lv_obj_t *p = lv_obj_get_parent(btn);
+    while (p && lv_obj_get_user_data(p) == NULL) {
+        p = lv_obj_get_parent(p);
+    }
+    if (!p) return;
+    settings_widgets_t *w = lv_obj_get_user_data(p);
+    if (!w) return;
+
+    w->current_cat = (settings_category_t)idx;
+    apply_nav_style(w, idx);
+    rebuild_panel_content(w, w->current_cat);
+}
+
+/* ─── create screen ──────────────────────────────────────────────── */
+
+lv_obj_t *scr_settings_create(lv_obj_t *parent)
+{
+    lv_obj_t *root = lv_obj_create(parent);
+    lv_obj_set_size(root, UI_SCREEN_W, UI_CONTENT_H);
+    lv_obj_set_pos(root, 0, 0);
+    lv_obj_set_style_bg_color(root, ui_token_bg_base(), 0);
+    lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(root, 0, 0);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+
+    settings_widgets_t *w = lv_malloc_zeroed(sizeof(*w));
+    if (!w) return root;
+    lv_obj_set_user_data(root, w);
+    lv_obj_add_event_cb(root, widgets_free_cb, LV_EVENT_DELETE, NULL);
+
+    /* ─── Left: nav-list ─────────────────────────────────────────── */
+    lv_obj_t *nav = lv_obj_create(root);
+    lv_obj_set_pos(nav, PAGE_PAD, PAGE_PAD);
+    lv_obj_set_size(nav, NAV_W, INNER_H);
+    lv_obj_set_style_bg_color(nav, ui_token_bg_card(), 0);
+    lv_obj_set_style_bg_opa(nav, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(nav, ui_token_border(), 0);
+    lv_obj_set_style_border_width(nav, 1, 0);
+    lv_obj_set_style_radius(nav, UI_RADIUS_LG, 0);
+    lv_obj_set_style_pad_all(nav, UI_GAP_SM, 0);
+    lv_obj_set_flex_flow(nav, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(nav, 4, 0);
+    lv_obj_remove_flag(nav, LV_OBJ_FLAG_SCROLLABLE);
+
+    for (int i = 0; i < CATEGORY_COUNT; i++) {
+        lv_obj_t *btn = lv_obj_create(nav);
+        lv_obj_set_size(btn, LV_PCT(100), 48);
+        lv_obj_set_style_bg_color(btn, ui_token_bg_card(), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(btn, 0, 0);
+        lv_obj_set_style_radius(btn, UI_RADIUS_MD, 0);
+        lv_obj_set_style_pad_hor(btn, UI_GAP_MD, 0);
+        lv_obj_set_style_pad_ver(btn, 0, 0);
+        lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(btn, nav_btn_event_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+        w->nav_btn[i] = btn;
+
+        lv_obj_t *lbl = lv_label_create(btn);
+        lv_label_set_text(lbl, CATEGORIES[i].name);
+        lv_obj_set_style_text_color(lbl, ui_token_text_primary(), 0);
+        lv_obj_set_style_text_font(lbl, UI_FONT_MD, 0);
+        lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
+    }
+
+    /* ─── Right: content panel ────────────────────────────────────── */
+    int panel_x = PAGE_PAD + NAV_W + COL_GAP;
+
+    /* Card wrapper — заголовок + контент. */
+    lv_obj_t *card = lv_obj_create(root);
+    lv_obj_set_pos(card, panel_x, PAGE_PAD);
+    lv_obj_set_size(card, PANEL_W, INNER_H);
+    lv_obj_set_style_bg_color(card, ui_token_bg_card(), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(card, ui_token_border(), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, UI_RADIUS_LG, 0);
+    lv_obj_set_style_pad_all(card, UI_GAP_LG, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, UI_GAP_MD, 0);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Header row: title (large). */
+    w->title_label = lv_label_create(card);
+    lv_label_set_text(w->title_label, CATEGORIES[CAT_PRESSURE].name);
+    lv_obj_set_style_text_color(w->title_label, ui_token_text_primary(), 0);
+    lv_obj_set_style_text_font(w->title_label, UI_FONT_LG, 0);
+
+    /* Content panel — scrollable. */
+    w->panel = lv_obj_create(card);
+    lv_obj_set_size(w->panel, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(w->panel, 1);
+    lv_obj_set_style_bg_opa(w->panel, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(w->panel, 0, 0);
+    lv_obj_set_style_pad_all(w->panel, 0, 0);
+    lv_obj_set_flex_flow(w->panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(w->panel, LV_DIR_VER);
+
+    /* Init: показать pressure по умолчанию. */
+    w->current_cat = CAT_PRESSURE;
+    apply_nav_style(w, CAT_PRESSURE);
+    rebuild_panel_content(w, CAT_PRESSURE);
+
+    return root;
+}
+
+/* ─── update ─────────────────────────────────────────────────────── */
+
+void scr_settings_update(lv_obj_t *container, const plant_data_t *data, uint32_t dirty)
+{
+    (void)dirty;
+    if (!container || !data) return;
+    settings_widgets_t *w = lv_obj_get_user_data(container);
+    if (!w) return;
+
+    char buf[24];
+
+    /* Pressure category. */
+    if (w->val_p1_max) {
+        snprintf(buf, sizeof(buf), "%.1f bar", data->set_pressure.p1_max);
+        lv_label_set_text(w->val_p1_max, buf);
+    }
+    if (w->val_p3_max) {
+        snprintf(buf, sizeof(buf), "%.1f bar", data->set_pressure.p3_max);
+        lv_label_set_text(w->val_p3_max, buf);
+    }
+    if (w->val_p4_max) {
+        snprintf(buf, sizeof(buf), "%.1f bar", data->set_pressure.p4_max);
+        lv_label_set_text(w->val_p4_max, buf);
+    }
+    if (w->val_filter_dp) {
+        snprintf(buf, sizeof(buf), "%.1f bar", data->set_pressure.filter_dp_warn);
+        lv_label_set_text(w->val_filter_dp, buf);
+    }
+
+    /* Doser. */
+    if (w->val_run_time) {
+        snprintf(buf, sizeof(buf), "%d мин", data->set_doser.run_time_min);
+        lv_label_set_text(w->val_run_time, buf);
+    }
+    if (w->val_cycle_time) {
+        snprintf(buf, sizeof(buf), "%d мин", data->set_doser.cycle_time_min);
+        lv_label_set_text(w->val_cycle_time, buf);
+    }
+
+    /* Washing. */
+    if (w->val_wash_target_t) {
+        snprintf(buf, sizeof(buf), "%.1f °C", data->set_washing.target_temp_C);
+        lv_label_set_text(w->val_wash_target_t, buf);
+    }
+    if (w->val_wash_max_t) {
+        snprintf(buf, sizeof(buf), "%.1f °C", data->set_washing.max_temp_C);
+        lv_label_set_text(w->val_wash_max_t, buf);
+    }
+
+    /* Timeouts. */
+    if (w->val_pump_confirm) {
+        snprintf(buf, sizeof(buf), "%d мс", data->set_timeouts.pump_confirm_ms);
+        lv_label_set_text(w->val_pump_confirm, buf);
+    }
+    if (w->val_pump_ramp) {
+        snprintf(buf, sizeof(buf), "%d мс", data->set_timeouts.pump_ramp_ms);
+        lv_label_set_text(w->val_pump_ramp, buf);
     }
 }
