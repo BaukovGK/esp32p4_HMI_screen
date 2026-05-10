@@ -176,8 +176,9 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
       направлению потока, clipping контейнером на bbox трубы.
 - [x] Recycle-march: animation translate на dashed pipe-recycle лини
       (период 16 px, 1.6 s).
-- [x] Tank-wave: surface highlight (2px белая) translate_x -10..+10 за
-      5s с ease-in-out playback — "дышащая" поверхность воды.
+- [~] Tank-wave: убрана по запросу — вместо колышущейся поверхности
+      высота столба воды теперь динамически меняется в зависимости
+      от DI-битов уровневых датчиков (см. scr_mnemonic_update::DIRTY_IO).
 - [x] Pump-spin: непрерывное вращение ротора (transform_rotation) с
       разной скоростью для running (1.5s) и starting (3s).
 - [x] Pump-pulse: opacity 100..50% для starting (1.2s) и error (1.0s)

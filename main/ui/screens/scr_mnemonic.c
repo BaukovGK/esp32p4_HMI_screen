@@ -429,26 +429,43 @@ void scr_mnemonic_update(lv_obj_t *container, const plant_data_t *data, uint32_t
         update_sensor_value(w->s_sigma3, data->conductivity[2].conductivity, 1);
     }
 
-    /* IO: поплавки уровня + статус насосов.
+    /* IO: поплавки уровня + статус насосов + уровень воды в ёмкостях.
      * Маппинг proto-меток на hardware DI-биты:
      *   "DI1" (Исходная low)  ↔ DI_SOURCE_LOW
      *   "DI3" (Промеж high)   ↔ DI_INTERM_HIGH
      *   "DI2" (Промеж low)    ↔ DI_INTERM_LOW
-     *   "DI4" (Чистая high)   ↔ DI_PERMEATE_HIGH */
+     *   "DI4" (Чистая high)   ↔ DI_PERMEATE_HIGH
+     *
+     * Высота столба воды визуализирует state поплавков (на железе
+     * нет непрерывного level sensor — только 1-2 дискретных уровня).
+     * Mapping:
+     *   ИСХОДНАЯ:    low dry → 10%,  low wet → 60%
+     *   ПРОМЕЖ:      low dry → 10%,  low wet+high dry → 55%,  high wet → 90%
+     *   ЧИСТАЯ:      high dry → 50%, high wet → 90%
+     */
     if (dirty & DIRTY_IO) {
+        bool src_low    = (data->di & DI_SOURCE_LOW) != 0;
+        bool int_low    = (data->di & DI_INTERM_LOW) != 0;
+        bool int_high   = (data->di & DI_INTERM_HIGH) != 0;
+        bool prod_high  = (data->di & DI_PERMEATE_HIGH) != 0;
+
         if (w->tank_feed) {
             ui_tank_set_switch_state(w->tank_feed, 0,
-                di_to_sw_state(data->di, DI_SOURCE_LOW));
+                src_low ? UI_LEVEL_SW_ACTIVE : UI_LEVEL_SW_DRY);
+            ui_tank_set_fill(w->tank_feed, src_low ? 60 : 10);
         }
         if (w->tank_inter) {
             ui_tank_set_switch_state(w->tank_inter, 0,
-                di_to_sw_state(data->di, DI_INTERM_HIGH));
+                int_high ? UI_LEVEL_SW_ACTIVE : UI_LEVEL_SW_DRY);
             ui_tank_set_switch_state(w->tank_inter, 1,
-                di_to_sw_state(data->di, DI_INTERM_LOW));
+                int_low ? UI_LEVEL_SW_ACTIVE : UI_LEVEL_SW_DRY);
+            int inter_fill = int_high ? 90 : (int_low ? 55 : 10);
+            ui_tank_set_fill(w->tank_inter, inter_fill);
         }
         if (w->tank_prod) {
             ui_tank_set_switch_state(w->tank_prod, 0,
-                di_to_sw_state(data->di, DI_PERMEATE_HIGH));
+                prod_high ? UI_LEVEL_SW_ACTIVE : UI_LEVEL_SW_DRY);
+            ui_tank_set_fill(w->tank_prod, prod_high ? 90 : 50);
         }
 
         if (w->pump_pre) {
