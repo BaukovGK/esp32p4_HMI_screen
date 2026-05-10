@@ -109,10 +109,29 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 
 ### Фаза 3 итого ✅ — все модалы готовы.
 
-### Фаза 4 — Промывка
-- [ ] Заменить `scr_washing.c` на новый layout: compact phase-track +
-      info-strip (timers + temps в одной полоске) + wash-mnemo placeholder.
-- [ ] Поведение фаз: idle → heat → circ → drain (см. UI_SPEC §5).
+### Фаза 4 — Промывка ✅
+- [x] Полностью переписан `scr_washing.c` под прототип proto/washing.html:
+      Left card (≈864 px) — title "Режим промывки" + badge "Мойка" +
+      compact 4-phase track (Ожидание/Нагрев/Подача/Слив, по 36 px) +
+      info-strip (Прошло/Осталось/Текущая/Целевая в одной полосе 64 px,
+      разделены divider'ом) + wash-mnemo placeholder (под будущую
+      CIP-схему).
+      Right column (380 px) — 3 stacked cards:
+        Состояние оборудования (5 строк: Преднагн/Нагреватель/насосы/Дозатор)
+        Действия (4 кнопки: Начать нагрев/Подтв. подачу/Подтв. слив/Отменить)
+        Подсказка (текст с инструкцией оператору).
+- [x] Map 7 wash_sub_state_t → 4 видимых фазы (map_wash_state helper).
+      Каждая фаза имеет 3 визуальных состояния: pending (bg-mute) /
+      active (accent-mute + accent border) / done (accent-mute + success
+      border).
+- [x] Кнопки enable'ятся в зависимости от текущего sub-state:
+      btn_heat   ↔ WAIT_HEAT
+      btn_supply ↔ WAIT_SUPPLY
+      btn_drain  ↔ WAIT_DRAIN
+      btn_cancel — always enabled
+- [x] Equipment status badges обновляются из data->di/do_bits/doser.
+- [ ] (TODO в фазе 6) Time elapsed/remaining — пока mock "--:--",
+      реальные значения придут по washing/elapsed_s MQTT-topic'у.
 
 ### Фаза 5 — Настройки + Отладка
 - [ ] Перерисовать `scr_settings.c` под новую вёрстку (220px nav-list +
