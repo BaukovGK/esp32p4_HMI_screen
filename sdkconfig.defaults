@@ -1,5 +1,10 @@
-# Target
+# Target — Waveshare ESP32-P4-NANO.
+# Оба ключа нужны: CONFIG_IDF_TARGET — строковая идентификация,
+# CONFIG_IDF_TARGET_ESP32P4=y активирует зависимые опции
+# (SOC_MIPI_DSI_SUPPORTED через soc_caps.h, без этого esp_lcd/dsi/*
+# не собирается и esp_lcd_mipi_dsi.h не находится).
 CONFIG_IDF_TARGET="esp32p4"
+CONFIG_IDF_TARGET_ESP32P4=y
 
 # Flash
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
