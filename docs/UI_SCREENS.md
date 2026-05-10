@@ -101,7 +101,7 @@ secondary:
 |---|---|---|---|---|
 | **LARGE** (80×) | ▶ **Пуск AUTO** | `mode = start_auto` | guest | yes |
 | **LARGE** (80×) | ⚙ **Ручной режим** | `mode = set_manual` + переход | technolog (PIN) | yes |
-| medium (60×) | ⏹ Стоп | `mode = stop` | guest | yes |
+| medium (60×) | ⏹ Стоп | `mode = stop` | guest | **no — защитное действие, выполняется сразу** |
 | medium (60×) | Промывка | переход на экран Промывка | technolog | no (confirm на самом экране) |
 | medium (60×) | 🔇 Заглушить (виден только если есть актив. алармы) | `silence` | technolog | no |
 
