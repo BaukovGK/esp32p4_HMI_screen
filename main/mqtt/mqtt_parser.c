@@ -28,6 +28,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 #include <stdint.h>
 
