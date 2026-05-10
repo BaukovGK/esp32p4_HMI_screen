@@ -31,6 +31,20 @@ static plant_data_t s_data;
 // Мьютекс для защиты s_data от одновременного доступа из разных задач
 static SemaphoreHandle_t s_mutex = NULL;
 
+/* Стандартный таймаут захвата мьютекса для setter/getter (мс).
+ * portMAX_DELAY запрещён правилами проекта вне HAL-вызовов. */
+#define PLANT_DATA_LOCK_MS 50
+
+/**
+ * Захват s_mutex с конечным таймаутом (PLANT_DATA_LOCK_MS).
+ * Возвращает true при успехе, false при таймауте.
+ * Используется внутри сеттеров/геттеров вместо xSemaphoreTake(.., portMAX_DELAY).
+ */
+static inline bool plant_data_try_lock(void)
+{
+    return xSemaphoreTake(s_mutex, pdMS_TO_TICKS(PLANT_DATA_LOCK_MS)) == pdTRUE;
+}
+
 /* ---- NVS: пространство имён и ключи для хранения уставок ---- */
 #define NVS_NAMESPACE   "ro_settings"
 #define NVS_KEY_PRESS   "set_press"
@@ -91,6 +105,7 @@ void plant_data_init(void)
 {
     memset(&s_data, 0, sizeof(s_data));
     s_data.state = PLANT_STATE_UNKNOWN;
+    s_data.controller_online = false; // до прихода availability считаем offline
 
     // Инициализация аналоговых значений в NAN (нет данных)
     for (int i = 0; i < 4; i++) {
@@ -189,16 +204,19 @@ uint32_t plant_data_get_and_clear_dirty(void)
 
 /* ---- Потокобезопасные сеттеры (вызываются из задачи MQTT) ---- */
 /*
- * Каждый сеттер самостоятельно захватывает мьютекс (portMAX_DELAY = ждать бесконечно),
- * записывает данные, устанавливает соответствующий dirty-бит,
- * обновляет метку времени последнего сообщения и освобождает мьютекс.
+ * Каждый сеттер захватывает s_mutex с конечным таймаутом PLANT_DATA_LOCK_MS.
+ * При таймауте — лог + drop пакета (последнее значение остаётся в s_data).
+ * portMAX_DELAY вне HAL запрещён правилами проекта.
  */
 
 /** Установить состояние автоматики, подсостояния и флаги аварий */
 void plant_data_set_state(plant_state_t state, auto_sub_state_t asub,
                           wash_sub_state_t wsub, uint32_t fault_flags)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_state");
+        return;
+    }
     s_data.state = state;
     s_data.auto_sub = asub;
     s_data.wash_sub = wsub;
@@ -211,7 +229,10 @@ void plant_data_set_state(plant_state_t state, auto_sub_state_t asub,
 /** Установить состояние дискретных входов и выходов */
 void plant_data_set_io(uint8_t di, uint8_t do_bits)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_io");
+        return;
+    }
     s_data.di = di;
     s_data.do_bits = do_bits;
     s_data.dirty_flags |= DIRTY_IO;
@@ -223,7 +244,10 @@ void plant_data_set_io(uint8_t di, uint8_t do_bits)
 void plant_data_set_pressure(int idx, float value, bool fault)
 {
     if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_pressure");
+        return;
+    }
     s_data.pressure[idx].value = value;
     s_data.pressure[idx].fault = fault;
     s_data.dirty_flags |= DIRTY_ANALOG;
@@ -234,7 +258,10 @@ void plant_data_set_pressure(int idx, float value, bool fault)
 /** Установить значение датчика температуры */
 void plant_data_set_temperature(float value, bool fault)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_temperature");
+        return;
+    }
     s_data.temperature.value = value;
     s_data.temperature.fault = fault;
     s_data.dirty_flags |= DIRTY_ANALOG;
@@ -246,7 +273,10 @@ void plant_data_set_temperature(float value, bool fault)
 void plant_data_set_flow(int idx, float flow, float volume, bool ok)
 {
     if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_flow");
+        return;
+    }
     s_data.flow[idx].flow = flow;
     s_data.flow[idx].volume = volume;
     s_data.flow[idx].ok = ok;
@@ -259,7 +289,10 @@ void plant_data_set_flow(int idx, float flow, float volume, bool ok)
 void plant_data_set_conductivity(int idx, float cond, float temp, bool ok)
 {
     if (idx < 0 || idx >= 4) return; // защита от выхода за границы массива
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_conductivity");
+        return;
+    }
     s_data.conductivity[idx].conductivity = cond;
     s_data.conductivity[idx].temperature = temp;
     s_data.conductivity[idx].ok = ok;
@@ -272,7 +305,10 @@ void plant_data_set_conductivity(int idx, float cond, float temp, bool ok)
 void plant_data_set_power_meter(int idx, const power_meter_data_t *data)
 {
     if (idx < 0 || idx >= 2 || !data) return;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_power_meter");
+        return;
+    }
     s_data.pumps[idx] = *data; // структурное копирование
     s_data.dirty_flags |= DIRTY_POWER;
     s_data.last_msg_time_us = esp_timer_get_time();
@@ -282,7 +318,11 @@ void plant_data_set_power_meter(int idx, const power_meter_data_t *data)
 /** Установить расчётную телеметрию (копирование всей структуры) */
 void plant_data_set_telemetry(const telemetry_t *tel)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!tel) return;
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_telemetry");
+        return;
+    }
     s_data.telemetry = *tel;
     s_data.dirty_flags |= DIRTY_TELEMETRY;
     s_data.last_msg_time_us = esp_timer_get_time();
@@ -292,7 +332,10 @@ void plant_data_set_telemetry(const telemetry_t *tel)
 /** Установить состояние блокировок (флаги, аварийная кнопка, предупреждение фильтра) */
 void plant_data_set_interlocks(uint32_t flags, bool estop, bool filter_warn)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_interlocks");
+        return;
+    }
     s_data.interlocks.flags = flags;
     s_data.interlocks.estop = estop;
     s_data.interlocks.filter_warn = filter_warn;
@@ -304,7 +347,10 @@ void plant_data_set_interlocks(uint32_t flags, bool estop, bool filter_warn)
 /** Установить состояние дозатора антискаланта */
 void plant_data_set_doser(doser_state_t state, bool enabled)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_doser");
+        return;
+    }
     s_data.doser.state = state;
     s_data.doser.enabled = enabled;
     s_data.dirty_flags |= DIRTY_DOSER;
@@ -315,7 +361,11 @@ void plant_data_set_doser(doser_state_t state, bool enabled)
 /** Установить диагностику контроллера (копирование всей структуры) */
 void plant_data_set_diagnostics(const diagnostics_t *diag)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!diag) return;
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_diagnostics");
+        return;
+    }
     s_data.diagnostics = *diag;
     s_data.dirty_flags |= DIRTY_DIAGNOSTICS;
     s_data.last_msg_time_us = esp_timer_get_time();
@@ -329,10 +379,44 @@ void plant_data_set_diagnostics(const diagnostics_t *diag)
  */
 void plant_data_set_mqtt_status(bool connected)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_mqtt_status");
+        return;
+    }
     s_data.mqtt_connected = connected;
     s_data.dirty_flags |= DIRTY_STATE;
     xSemaphoreGive(s_mutex);
+}
+
+/**
+ * Установить флаг controller_online (по топику ro_plant/availability).
+ * Не обновляет last_msg_time_us — это статус контроллера, а не его данные.
+ */
+void plant_data_set_controller_online(bool online)
+{
+    if (!plant_data_try_lock()) {
+        ESP_LOGW(TAG, "plant_data lock timeout in set_controller_online");
+        return;
+    }
+    s_data.controller_online = online;
+    s_data.dirty_flags |= DIRTY_CONTROLLER;
+    xSemaphoreGive(s_mutex);
+}
+
+/**
+ * Получить флаг controller_online (потокобезопасно).
+ * При таймауте мьютекса — fallback в false (консервативно: считаем offline).
+ */
+bool plant_data_get_controller_online(void)
+{
+    bool online = false;
+    if (plant_data_try_lock()) {
+        online = s_data.controller_online;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in get_controller_online");
+    }
+    return online;
 }
 
 /* ---- Удобные геттеры для KWS-306L ---- */
@@ -379,44 +463,57 @@ static void nvs_save_blob(const char *key, const void *data, size_t len)
 
 void plant_data_save_settings_pressure(const settings_pressure_t *s)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_data.set_pressure = *s;
-    s_data.dirty_flags |= DIRTY_STATE;
-    xSemaphoreGive(s_mutex);
-
+    if (!s) return;
+    if (plant_data_try_lock()) {
+        s_data.set_pressure = *s;
+        s_data.dirty_flags |= DIRTY_SETTINGS;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_settings_pressure");
+        /* Кэш не обновлён, но запись в NVS всё равно делаем — следующий старт подхватит */
+    }
     nvs_save_blob(NVS_KEY_PRESS, s, sizeof(*s));
     ESP_LOGI(TAG, "NVS: saved pressure settings");
 }
 
 void plant_data_save_settings_doser(const settings_doser_t *s)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_data.set_doser = *s;
-    s_data.dirty_flags |= DIRTY_STATE;
-    xSemaphoreGive(s_mutex);
-
+    if (!s) return;
+    if (plant_data_try_lock()) {
+        s_data.set_doser = *s;
+        s_data.dirty_flags |= DIRTY_SETTINGS;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_settings_doser");
+    }
     nvs_save_blob(NVS_KEY_DOSER, s, sizeof(*s));
     ESP_LOGI(TAG, "NVS: saved doser settings");
 }
 
 void plant_data_save_settings_washing(const settings_washing_t *s)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_data.set_washing = *s;
-    s_data.dirty_flags |= DIRTY_STATE;
-    xSemaphoreGive(s_mutex);
-
+    if (!s) return;
+    if (plant_data_try_lock()) {
+        s_data.set_washing = *s;
+        s_data.dirty_flags |= DIRTY_SETTINGS;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_settings_washing");
+    }
     nvs_save_blob(NVS_KEY_WASH, s, sizeof(*s));
     ESP_LOGI(TAG, "NVS: saved washing settings");
 }
 
 void plant_data_save_settings_timeouts(const settings_timeouts_t *s)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_data.set_timeouts = *s;
-    s_data.dirty_flags |= DIRTY_STATE;
-    xSemaphoreGive(s_mutex);
-
+    if (!s) return;
+    if (plant_data_try_lock()) {
+        s_data.set_timeouts = *s;
+        s_data.dirty_flags |= DIRTY_SETTINGS;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_settings_timeouts");
+    }
     nvs_save_blob(NVS_KEY_TMOUT, s, sizeof(*s));
     ESP_LOGI(TAG, "NVS: saved timeout settings");
 }

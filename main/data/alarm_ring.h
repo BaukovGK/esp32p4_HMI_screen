@@ -63,3 +63,11 @@ alarm_category_t alarm_ring_worst_active(void);
  * @return текущее значение generation counter
  */
 uint32_t         alarm_ring_generation(void);
+
+/**
+ * Количество операций, дропнутых из-за таймаута мьютекса alarm_ring.
+ * Растёт монотонно за всё время работы. Полезно для диагностики
+ * перегрузки или дедлоков.
+ * @return текущее значение счётчика дропов
+ */
+uint32_t         alarm_ring_get_dropped_count(void);

@@ -1,10 +1,11 @@
 # ESP-IDF build artefacts and managed dependencies
 build/
 managed_components/
+sdkconfig
 sdkconfig.old
 
-# Не игнорируем sdkconfig — он коммитится как baseline для проекта
-# Если хотите игнорировать — переименуйте default в sdkconfig.defaults
+# sdkconfig генерируется из sdkconfig.defaults через idf.py reconfigure
+# и должен игнорироваться — каждый разработчик генерирует его для своей платформы
 
 # IDE / editor
 .vscode/

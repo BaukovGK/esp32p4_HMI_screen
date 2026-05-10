@@ -22,6 +22,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 // Общая шина I2C для периферии платы (MCU дисплея, тач-контроллер)
 #include "board_i2c.h"
@@ -75,8 +76,13 @@ void app_main(void)
      *    I2C MCU pre-init (0x45) выполняется внутри компонента — переиспользует нашу шину. */
     lv_display_t *disp = display_init();
     if (disp == NULL) {
-        ESP_LOGE(TAG, "Display initialization failed");
-        return; // Без дисплея работа невозможна — выход
+        // Без дисплея HMI бесполезен: оператор не видит состояние установки.
+        // Возврат из app_main оставил бы FreeRTOS со «зомби» idle-task без UI и MQTT —
+        // оператор не понимал бы что произошло. Перезапуск даёт шанс на восстановление
+        // (например, при кратковременном сбое питания LDO или DSI PHY).
+        ESP_LOGE(TAG, "display_init failed - restarting in 3s");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        esp_restart();
     }
     ESP_LOGI(TAG, "Display initialized (1280x800)");
 

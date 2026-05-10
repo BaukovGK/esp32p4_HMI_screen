@@ -116,7 +116,7 @@ esp_err_t mqtt_client_start(void)
         .network.reconnect_timeout_ms = 5000,  // Переподключение каждые 5 сек
         .task.stack_size = 8192,                // Размер стека задачи MQTT
         .task.priority = 6,                     // Приоритет задачи MQTT
-        .buffer.size = 2048,                    // Размер буфера приема/передачи
+        .buffer.size = 4096,                    // Размер буфера приема/передачи (было 2048, увеличено до 4096 для diagnostics-payload с modbus)
     };
 
     // Инициализация MQTT-клиента
