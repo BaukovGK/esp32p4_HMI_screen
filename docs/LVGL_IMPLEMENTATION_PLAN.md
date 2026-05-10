@@ -39,7 +39,7 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 - [ ] Удалить устаревшие `ui_alarm_bar_*` и `ui_nav_bar_*` из ui_common.c
       (после того, как все экраны перейдут на новые токены).
 
-### Фаза 2 — мнемосхема (главный экран)
+### Фаза 2 — мнемосхема (главный экран) ✅
 Контейнер: `lv_canvas` 900×530 (после crop viewBox 0 30 900 530), либо
 композитные `lv_obj`-виджеты (предпочтительно — анимации проще).
 
@@ -71,9 +71,15 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
       kind)` для горизонтальных/вертикальных сегментов через lv_line;
       kind = INACTIVE/ACTIVE/RECYCLE. `ui_pipe_junction(p, cx, cy)` —
       filled circle 8×8 для узла трубопровода.
-- [ ] **Mnemo composer** — собирает всю мнемосхему по координатам из
-      `proto/index.html`. Главный target: `scr_mnemonic.c` после
-      переписывания.
+- [x] **Mnemo composer** (`scr_mnemonic.c` rewrite) — собирает всю
+      мнемосхему по координатам из `proto/index.html` через SX(svg)/
+      SY(svg-30) helpers (учёт viewBox 0 30 900 530 → MNEMO_PX).
+      Все 3 ёмкости + 3 насоса + фильтр + 2 мембраны + дозатор +
+      10 датчиков + ~20 трубопроводов + 3 junction'а размещаются на
+      MNEMO_PX_W × MNEMO_PX_H канвасе с горизонтальным letterbox'ом.
+      `scr_mnemonic_update()` обрабатывает dirty-flags ANALOG/FLOW/
+      CONDUCTIVITY/IO и обновляет sensor values + tank switches +
+      pump states по data->pressure/flow/conductivity/di.
 
 ### Фаза 3 — модалы
 - [ ] `ui_modal.h/.c` — generic overlay с close-button, backdrop click.
