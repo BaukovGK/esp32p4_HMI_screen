@@ -68,13 +68,16 @@ static esp_err_t backlight_init(void)
 }
 
 /**
- * Установка яркости подсветки дисплея.
+ * Установка яркости подсветки дисплея (0-100%).
+ *
+ * @param brightness_percent Яркость: 0 (выключено) до 100 (полная)
+ * @return ESP_OK на успех, иначе ошибка LEDC
  */
-static esp_err_t backlight_set(int brightness_percent)
+esp_err_t backlight_set(int brightness_percent)
 {
     if (brightness_percent < 0) brightness_percent = 0;
     if (brightness_percent > 100) brightness_percent = 100;
-    uint32_t duty = (1023 * brightness_percent) / 100;
+    uint32_t duty = (BOARD_LCD_LEDC_MAX_DUTY * brightness_percent) / 100;
     ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_LEDC_CH, duty), TAG, "Set duty failed");
     ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_LEDC_CH), TAG, "Update duty failed");
     return ESP_OK;
@@ -243,14 +246,14 @@ lv_display_t *display_init(void)
     lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
     ESP_LOGI(TAG, "Display ready (landscape 1280x800, sw rotation 270)");
 
-    /* 10. Включение подсветки на 100%.
-     *     Если LEDC update вдруг упадёт — экран покажется чёрным, но это не повод
-     *     рушить всю инициализацию: дисплей уже работает. Логируем и продолжаем. */
-    err = backlight_set(100);
+    /* 10. Подсветка стартует выключенной (=0). Включать (например через
+     *     backlight_set(100) или плавный fade) НУЖНО ПОСЛЕ первого
+     *     lv_refr_now(disp) в app_main, иначе пользователь видит мусор RAM
+     *     панели между init и первым flush LVGL. Вызови backlight_set() из
+     *     app_main.c сразу после ui_init(). */
+    err = backlight_set(0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "backlight_set failed: %s (display will be dark)", esp_err_to_name(err));
-    } else {
-        ESP_LOGI(TAG, "Backlight on");
+        ESP_LOGW(TAG, "backlight_set(0) failed: %s", esp_err_to_name(err));
     }
 
     return disp;

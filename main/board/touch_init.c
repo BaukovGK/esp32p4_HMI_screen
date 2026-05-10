@@ -20,6 +20,7 @@
 #include "board_i2c.h"            // Общая шина I2C
 #include "esp_lcd_touch_gt911.h"  // Драйвер ёмкостного тач-контроллера GT911
 #include "esp_lvgl_port.h"        // Интеграция LVGL с ESP-IDF
+#include "driver/gpio.h"          // GPIO configuration
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -60,10 +61,19 @@ lv_indev_t *touch_init(lv_display_t *disp)
         return NULL;
     }
 
-    /* 3. Настройка параметров сенсорного контроллера.
-     *    int_gpio_num = GPIO_NUM_NC — используем polling mode (LV_INDEV_MODE_TIMER).
-     *    Interrupt mode вызывает WDT crash: GT911 держит INT в LOW после инициализации,
-     *    что вызывает шторм прерываний на NEGEDGE и блокирует FreeRTOS tick. */
+    /* 3a. Конфигурация INT-пина (GPIO21) в polling-режиме.
+     *     INT не используется прерыванием (режим polling), но нога должна быть
+     *     в стабильном состоянии (pull-up) — иначе паразитная ёмкость и плавающий
+     *     потенциал будут вызывать лишний расход энергии. */
+    gpio_reset_pin(BOARD_TOUCH_INT_GPIO);
+    gpio_set_direction(BOARD_TOUCH_INT_GPIO, GPIO_MODE_INPUT);
+    gpio_pullup_en(BOARD_TOUCH_INT_GPIO);
+    ESP_LOGI(TAG, "Touch INT GPIO configured (polling mode, pull-up enabled)");
+
+    /* 3b. Настройка параметров сенсорного контроллера.
+     *     int_gpio_num = GPIO_NUM_NC — используем polling mode (LV_INDEV_MODE_TIMER).
+     *     Interrupt mode вызывает WDT crash: GT911 держит INT в LOW после инициализации,
+     *     что вызывает шторм прерываний на NEGEDGE и блокирует FreeRTOS tick. */
     /* GT911 на этой плате настроен в ландшафтной ориентации:
      * raw_x = 0..1280 (длинная сторона), raw_y = 0..800 (короткая).
      * swap_xy не нужен — оси уже совпадают с LVGL viewport 1280x800. */

@@ -21,6 +21,7 @@ typedef int esp_err_t;
 
 #include "plant_data.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 /** Инициализация и запуск MQTT-клиента (подключение к брокеру) */
 esp_err_t mqtt_client_start(void);
@@ -58,3 +59,11 @@ esp_err_t mqtt_publish_settings_washing(const settings_washing_t *s);
 
 /** Отправка настроек таймаутов насосов */
 esp_err_t mqtt_publish_settings_timeouts(const settings_timeouts_t *s);
+
+/* Диагностика (M8) */
+
+/** Получить количество неизвестных топиков */
+uint32_t mqtt_app_get_unknown_topic_count(void);
+
+/** Получить общее количество обработанных MQTT-сообщений */
+uint32_t mqtt_app_get_message_count(void);

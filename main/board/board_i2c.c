@@ -86,7 +86,9 @@ esp_err_t board_i2c_init(void)
         portEXIT_CRITICAL(&s_i2c_bus_mux);
         ESP_LOGI(TAG, "I2C bus initialized (SDA=%d, SCL=%d)",
                  BOARD_TOUCH_I2C_SDA, BOARD_TOUCH_I2C_SCL);
+#ifdef CONFIG_BOARD_I2C_SCAN_ON_BOOT
         board_i2c_scan();
+#endif
     }
     return ret;
 }

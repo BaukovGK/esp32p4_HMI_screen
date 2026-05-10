@@ -19,6 +19,11 @@
 #include <stdbool.h>
 #include <math.h>
 
+/* ---- Константы ---- */
+
+/** Максимальное количество Modbus-устройств на шине (Waveshare AI + УРЖ + 2× СЛ21 + 2× KWS-306L) */
+#define DIAG_MAX_MB_DEVICES 6
+
 /* ---- Перечисления состояний установки ---- */
 
 /** Основное состояние установки */
@@ -127,17 +132,17 @@ typedef struct {
 
 /** Диагностика контроллера ESP32-S3 */
 typedef struct {
-    uint32_t heap_free;         // Свободная куча, байт
-    uint32_t heap_min;          // Минимум кучи за всё время работы, байт
-    int64_t  uptime_s;          // Время работы контроллера, секунды
-    uint32_t stack_modbus;      // Остаток стека задачи Modbus, байт
-    uint32_t stack_io;          // Остаток стека задачи IO, байт
-    uint32_t stack_process;     // Остаток стека задачи Process, байт
-    uint32_t stack_watchdog;    // Остаток стека задачи Watchdog, байт
-    uint32_t stack_mqtt;        // Остаток стека задачи MQTT, байт
-    uint32_t modbus_errors[4];  // Счётчики ошибок по каждому Modbus-устройству
-    bool     modbus_online[4];  // Статус связи с каждым Modbus-устройством
-    uint32_t wdt_stale;         // Битовая маска: какие задачи не отвечают WDT
+    uint32_t heap_free;              // Свободная куча, байт
+    uint32_t heap_min;               // Минимум кучи за всё время работы, байт
+    int64_t  uptime_s;               // Время работы контроллера, секунды
+    uint32_t stack_modbus;           // Остаток стека задачи Modbus, байт
+    uint32_t stack_io;               // Остаток стека задачи IO, байт
+    uint32_t stack_process;          // Остаток стека задачи Process, байт
+    uint32_t stack_watchdog;         // Остаток стека задачи Watchdog, байт
+    uint32_t stack_mqtt;             // Остаток стека задачи MQTT, байт
+    uint32_t modbus_errors[DIAG_MAX_MB_DEVICES];  // Счётчики ошибок по каждому Modbus-устройству
+    bool     modbus_online[DIAG_MAX_MB_DEVICES];  // Статус связи с каждым Modbus-устройством
+    uint32_t wdt_stale;              // Битовая маска: какие задачи не отвечают WDT
 } diagnostics_t;
 
 /** Запись журнала аварий */

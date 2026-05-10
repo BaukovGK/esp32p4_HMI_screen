@@ -48,7 +48,7 @@ dependencies:
       type: service
     version: 2.7.0
   espressif/i2c_bus:
-    component_hash: 4e990dc11734316186b489b362c61d41f23f79d58bc169795cec215e528cba14
+    component_hash: 804ec068d163570fd367b279a310ca383484630d2310c586b50def0bcf21de13
     dependencies:
     - name: espressif/cmake_utilities
       registry_url: https://components.espressif.com
@@ -60,7 +60,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.5.0
+    version: 1.5.1
   idf:
     source:
       type: idf
@@ -99,6 +99,6 @@ direct_dependencies:
 - idf
 - lvgl/lvgl
 - waveshare/esp_lcd_jd9365_10_1
-manifest_hash: da4232a6d3045680f91d131ec3b0aac3fef414887f5abcbf7ca4d9dceebdd942
+manifest_hash: 60fec2fbdf60fd13162b219229e6acc11885694395e1ab3ca8cc36531b24ffd2
 target: esp32p4
 version: 2.0.0

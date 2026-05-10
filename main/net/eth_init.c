@@ -148,7 +148,7 @@ esp_err_t eth_init(void)
 
     /* Конфигурация PHY-чипа IP101 */
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
-    phy_cfg.phy_addr = CONFIG_ETH_PHY_ADDR;            // Адрес PHY на шине SMI
+    phy_cfg.phy_addr = -1;                             // Autodetect адреса PHY (0 или 1 в зависимости от страпов на плате)
     phy_cfg.reset_gpio_num = CONFIG_ETH_PHY_RST_GPIO;  // GPIO аппаратного сброса PHY
     s_phy = esp_eth_phy_new_ip101(&phy_cfg);
     if (!s_phy) {
@@ -199,6 +199,13 @@ esp_err_t eth_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "eth start failed: %s", esp_err_to_name(err));
         goto cleanup;
+    }
+
+    /* Логирование MAC-адреса для отладки (DHCP-резервации, настройка коммутаторов) */
+    uint8_t mac[6];
+    if (esp_eth_ioctl(s_eth_handle, ETH_CMD_G_MAC_ADDR, mac) == ESP_OK) {
+        ESP_LOGI(TAG, "Ethernet MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
 
     ESP_LOGI(TAG, "Ethernet initialized, waiting for link...");
@@ -270,8 +277,10 @@ esp_err_t eth_wait_for_ip(TickType_t timeout_ticks)
         ESP_LOGE(TAG, "Event group not initialized");
         return ESP_ERR_INVALID_STATE;
     }
+    /* Single bit: xWaitForAllBits vs xWaitForAnyBits semantically identical;
+       pdFALSE (any) is more idiomatic for single-bit waits */
     EventBits_t bits = xEventGroupWaitBits(s_eth_event_group, ETH_GOT_IP_BIT,
-                                           pdFALSE, pdTRUE, timeout_ticks);
+                                           pdFALSE, pdFALSE, timeout_ticks);
     if (bits & ETH_GOT_IP_BIT) {
         return ESP_OK;
     }
