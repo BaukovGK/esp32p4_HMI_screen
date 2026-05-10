@@ -57,9 +57,9 @@
     --border: #d8dde2;
     --border-strong: #b8bfc7;
 
-    --accent: #2563eb;          /* primary blue */
-    --accent-hover: #1d4ed8;
-    --accent-mute: #dbeafe;
+    --accent: #2d8659;          /* corporate green (НТТ) */
+    --accent-hover: #1f6b45;
+    --accent-mute: #dcefe4;
 
     --success: #16a34a;          /* green — ok */
     --success-bg: #dcfce7;
@@ -79,22 +79,24 @@
 
 /* ───── dark theme ───── */
 [data-theme="dark"] {
-    --bg-base: #0f1419;
-    --bg-card: #1a1f26;
-    --bg-elev: #232830;
-    --bg-mute: #161a20;
+    /* мягкий тёмно-серый в стиле RustRover/современных IDE — не чёрный */
+    --bg-base: #1e2128;
+    --bg-card: #252932;
+    --bg-elev: #2c313c;
+    --bg-mute: #1a1d23;
 
     --text-primary: #e6e9ed;
     --text-secondary: #a8aeb6;
     --text-muted: #6c727b;
-    --text-inverse: #0f1419;
+    --text-inverse: #1e2128;
 
-    --border: #2c333d;
-    --border-strong: #3f4753;
+    --border: #363b47;
+    --border-strong: #4a5161;
 
-    --accent: #3b82f6;
-    --accent-hover: #60a5fa;
-    --accent-mute: #1e3a8a;
+    /* corporate green, чуть ярче для контраста на тёмном фоне */
+    --accent: #3fa66a;
+    --accent-hover: #52c179;
+    --accent-mute: #1a3826;
 
     --success: #22c55e;
     --success-bg: #14532d;
