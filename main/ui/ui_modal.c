@@ -334,6 +334,34 @@ void ui_modal_add_current_value(lv_obj_t *section,
     }
 }
 
+void ui_modal_add_progress_bar(lv_obj_t *section, int pct, ui_modal_state_t state)
+{
+    if (!section) return;
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+
+    /* Background track. */
+    lv_obj_t *track = lv_obj_create(section);
+    lv_obj_set_size(track, LV_PCT(100), 8);
+    lv_obj_set_style_bg_color(track, ui_token_bg_mute(), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(track, 4, 0);
+    lv_obj_set_style_border_width(track, 0, 0);
+    lv_obj_set_style_pad_all(track, 0, 0);
+    lv_obj_remove_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Fill — child track'а, ширина pct%. */
+    lv_obj_t *fill = lv_obj_create(track);
+    lv_obj_set_size(fill, LV_PCT(pct), 8);
+    lv_obj_set_pos(fill, 0, 0);
+    lv_obj_set_style_bg_color(fill, state_color(state), 0);
+    lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(fill, 4, 0);
+    lv_obj_set_style_border_width(fill, 0, 0);
+    lv_obj_set_style_pad_all(fill, 0, 0);
+    lv_obj_remove_flag(fill, LV_OBJ_FLAG_SCROLLABLE);
+}
+
 void ui_modal_add_range_bar(lv_obj_t *section, int pct,
                             const char *min_label, const char *max_label)
 {

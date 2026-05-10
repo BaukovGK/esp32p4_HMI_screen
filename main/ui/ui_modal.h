@@ -83,6 +83,15 @@ void ui_modal_add_current_value(lv_obj_t *section,
 void ui_modal_add_range_bar(lv_obj_t *section, int pct,
                             const char *min_label, const char *max_label);
 
+/**
+ * Progress bar — заполненная полоса 0..pct% с цветом по состоянию
+ * (для "наработка картриджа" / "до промывки" и т.п.).
+ *
+ * @param pct    Заполнение в процентах.
+ * @param state  Цвет заливки (OK=accent green, WARN=warning, DANGER=danger).
+ */
+void ui_modal_add_progress_bar(lv_obj_t *section, int pct, ui_modal_state_t state);
+
 #ifdef __cplusplus
 }
 #endif

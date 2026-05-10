@@ -29,6 +29,7 @@
 #include "ui_sensor.h"
 #include "ui_pipe.h"
 #include "ui_sensor_modal.h"
+#include "ui_equipment_modal.h"
 #include "lang.h"
 #include <math.h>
 #include <stdio.h>
@@ -97,6 +98,22 @@ static ui_pump_state_t di_to_pump_state(uint8_t di, uint8_t bit_mask)
 static void on_sensor_click(const char *tag, float value)
 {
     ui_sensor_modal_show(tag, value);
+}
+
+/* Общий handler для клика на оборудование (filter / pump / membrane).
+ * user_data — string literal с id оборудования ("filter", "pump-pre", etc.). */
+static void on_equipment_click(lv_event_t *e)
+{
+    const char *id = (const char *)lv_event_get_user_data(e);
+    if (id) ui_equipment_modal_show(id);
+}
+
+/* Сделать lv_obj кликабельным + повесить on_equipment_click с id. */
+static void attach_equipment_click(lv_obj_t *obj, const char *id)
+{
+    if (!obj) return;
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(obj, on_equipment_click, LV_EVENT_CLICKED, (void *)id);
 }
 
 /* ─── собрать мнемосхему по координатам прототипа ─────────────────── */
@@ -211,8 +228,11 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
 
     /* ═══ ОБОРУДОВАНИЕ ═══════════════════════════════════════════════ */
 
-    /* Фильтр */
-    ui_filter_create(canvas, SX(330), SY(210), "Фильтр");
+    /* Фильтр (кликабельный — открывает модал ΔP + ресурс картриджа) */
+    {
+        lv_obj_t *filter_obj = ui_filter_create(canvas, SX(330), SY(210), "Фильтр");
+        attach_equipment_click(filter_obj, "filter");
+    }
 
     /* Дозатор — простой rect */
     {
@@ -238,7 +258,7 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
         lv_obj_align(lbl2, LV_ALIGN_CENTER, 0, 6);
     }
 
-    /* Насосы */
+    /* Насосы (кликабельные — открывают модал состояния и моточасов) */
     ui_pump_config_t pump_cfg;
 
     pump_cfg = (ui_pump_config_t){
@@ -246,33 +266,36 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
         .label = "Преднагн.", .state = UI_PUMP_RUNNING,
     };
     w->pump_pre = ui_pump_create(canvas, &pump_cfg);
+    attach_equipment_click(w->pump_pre, "pump-pre");
 
     pump_cfg = (ui_pump_config_t){
         .cx = SX(478), .cy = SY(210),
         .label = "1-я ст.", .state = UI_PUMP_RUNNING,
     };
     w->pump_st1 = ui_pump_create(canvas, &pump_cfg);
+    attach_equipment_click(w->pump_st1, "pump-st1");
 
     pump_cfg = (ui_pump_config_t){
         .cx = SX(460), .cy = SY(350),
         .label = "2-я ст.", .state = UI_PUMP_RUNNING,
     };
     w->pump_st2 = ui_pump_create(canvas, &pump_cfg);
+    attach_equipment_click(w->pump_st2, "pump-st2");
 
-    /* Мембраны */
+    /* Мембраны (кликабельные — модал rejection + наработка от промывки) */
     ui_membrane_config_t m1 = {
         .x = SX(590), .y = SY(180),
         .w = SX(710) - SX(590), .h = SY(240) - SY(180),
         .label = "Мембрана 1ст.",
     };
-    ui_membrane_create(canvas, &m1);
+    attach_equipment_click(ui_membrane_create(canvas, &m1), "membrane-1");
 
     ui_membrane_config_t m2 = {
         .x = SX(220), .y = SY(320),
         .w = SX(340) - SX(220), .h = SY(380) - SY(320),
         .label = "Мембрана 2ст.",
     };
-    ui_membrane_create(canvas, &m2);
+    attach_equipment_click(ui_membrane_create(canvas, &m2), "membrane-2");
 
     /* ═══ ДАТЧИКИ ═══════════════════════════════════════════════════ */
 

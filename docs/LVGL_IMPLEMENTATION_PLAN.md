@@ -96,9 +96,18 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 - [x] ui_sensor click callback: ui_sensor_set_click_cb(sensor, cb).
       Внутри LVGL EVENT_CLICKED hook'ается; cb получает (tag, value).
       В scr_mnemonic зарегистрирован общий on_sensor_click для всех 10.
-- [ ] `ui_equipment_modal_show(equipment_id)` — порт showEquipmentDetail
-      (filter ΔP+runtime / pump state+hours / membrane wash+lifetime).
-      `equipmentMeta` → C-структура. Следующий коммит.
+- [x] `ui_equipment_modal_show(equipment_id)` — порт showEquipmentDetail.
+      id'ы: filter / pump-pre / pump-st1 / pump-st2 / membrane-1 / membrane-2.
+      Dispatcher по id находит соответствующий filter_meta_t / pump_meta_t /
+      membrane_meta_t из static таблиц и вызывает render_*_modal().
+      Filter: ΔP + cartridge runtime+progress bar.
+      Pump: state badge + run hours (continuous/total/starts) + ratings.
+      Membrane: rejection + wash time progress + lifetime progress.
+      Helper ui_modal_add_progress_bar (filled bar 0..pct% с state-цветом).
+      Клик-handler в scr_mnemonic: attach_equipment_click(obj, id_string).
+      Все 6 equipment'ов подключены: filter + 3 pumps + 2 membranes.
+
+### Фаза 3 итого ✅ — все модалы готовы.
 
 ### Фаза 4 — Промывка
 - [ ] Заменить `scr_washing.c` на новый layout: compact phase-track +
