@@ -38,6 +38,14 @@ static void tank_ctx_free_cb(lv_event_t *e)
     if (ctx) lv_free(ctx);
 }
 
+/* Anim exec_cb для translate_x. lv_obj_set_style_translate_x имеет
+ * 3 параметра (obj, value, selector) и не подходит напрямую для
+ * lv_anim_exec_xcb_t — нужна обёртка. */
+static void tank_wave_translate_cb(void *obj, int32_t v)
+{
+    lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0);
+}
+
 /* ─── вспомогательные функции для отрисовки ───────────────────────── */
 
 /** Применить геометрию воды по текущему % (water_h = h * pct / 100,
@@ -149,16 +157,37 @@ lv_obj_t *ui_tank_create(lv_obj_t *parent, const ui_tank_config_t *cfg)
     ctx->water = water;
 
     /* 3. Surface highlight — тонкая полоса 1.5px на верху воды.
-     * Имитирует .tank-wave-line (animated ripple) — пока статичная. */
+     * Анимирована translate_x: плавно покачивается -10..+0 за 5s
+     * (порт .tank-wave-line @keyframes из proto/style.css §8.2.3).
+     * Поскольку surface — child воды (с clip_corner на shell), при
+     * сдвиге не вылезает за пределы ёмкости. */
     lv_obj_t *surface = lv_obj_create(water);
-    lv_obj_set_size(surface, cfg->geom.w, 2);
-    lv_obj_set_pos(surface, 0, 0);
+    /* Шире водной поверхности — чтобы при translate -10 левый край
+     * не открывал гладкую воду. */
+    lv_obj_set_size(surface, cfg->geom.w + 20, 2);
+    lv_obj_set_pos(surface, -10, 0);
     lv_obj_set_style_radius(surface, 0, 0);
     lv_obj_set_style_border_width(surface, 0, 0);
     lv_obj_set_style_pad_all(surface, 0, 0);
     lv_obj_set_style_bg_color(surface, ((lv_color_t)LV_COLOR_MAKE(0xff, 0xff, 0xff)), 0);
     lv_obj_set_style_bg_opa(surface, (LV_OPA_COVER * 55) / 100, 0);
     lv_obj_remove_flag(surface, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Анимация волны: surface плавно покачивается -10..+10 (translate_x)
+     * по ease_in_out с playback. Период 5s (2.5s туда + 2.5s обратно).
+     * Имитирует proto/style.css .tank-wave-line @keyframes tank-wave. */
+    {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, surface);
+        lv_anim_set_exec_cb(&a, tank_wave_translate_cb);
+        lv_anim_set_values(&a, -10, 10);
+        lv_anim_set_duration(&a, 2500);
+        lv_anim_set_playback_duration(&a, 2500);
+        lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+        lv_anim_start(&a);
+    }
 
     /* 4. Название ёмкости — над водой. */
     if (cfg->geom.name) {

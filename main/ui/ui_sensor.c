@@ -40,6 +40,33 @@ typedef struct {
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 
+/* Анимация пульса для DANGER state — opacity 100..50% с playback. */
+static void sensor_pulse_cb(void *obj, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)obj, (v * LV_OPA_COVER) / 100, 0);
+}
+
+static void start_sensor_pulse(lv_obj_t *frame)
+{
+    lv_anim_delete(frame, sensor_pulse_cb);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, frame);
+    lv_anim_set_exec_cb(&a, sensor_pulse_cb);
+    lv_anim_set_values(&a, 100, 40);
+    lv_anim_set_duration(&a, 750);
+    lv_anim_set_playback_duration(&a, 750);   /* 1.5s полный цикл */
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_start(&a);
+}
+
+static void stop_sensor_pulse(lv_obj_t *frame)
+{
+    lv_anim_delete(frame, sensor_pulse_cb);
+    lv_obj_set_style_opa(frame, LV_OPA_COVER, 0);
+}
+
 static void apply_state(ui_sensor_ctx_t *ctx, ui_sensor_state_t state)
 {
     ctx->state = state;
@@ -73,9 +100,15 @@ static void apply_state(ui_sensor_ctx_t *ctx, ui_sensor_state_t state)
         lv_obj_set_style_border_color(ctx->frame, stroke, 0);
         lv_obj_set_style_border_width(ctx->frame,
             (state == UI_SENSOR_DANGER) ? 3 : 2, 0);
-        /* dashed border не поддерживается LVGL напрямую — для offline
-         * визуально снижаем opacity границы (компромисс vs proto). */
-        lv_obj_set_style_opa(ctx->frame, dashed ? LV_OPA_70 : LV_OPA_COVER, 0);
+        /* DANGER → пульсация opacity (как proto sc-pulse keyframes).
+         * OFFLINE → снижаем opacity до 70% (имитация dashed border). */
+        if (state == UI_SENSOR_DANGER) {
+            start_sensor_pulse(ctx->frame);
+        } else {
+            stop_sensor_pulse(ctx->frame);
+            lv_obj_set_style_opa(ctx->frame,
+                dashed ? LV_OPA_70 : LV_OPA_COVER, 0);
+        }
     }
     if (ctx->divider) {
         lv_obj_set_style_bg_color(ctx->divider, stroke, 0);

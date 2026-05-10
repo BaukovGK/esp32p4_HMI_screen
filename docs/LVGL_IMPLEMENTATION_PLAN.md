@@ -151,13 +151,22 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 - [ ] Локализация: `data-i18n` → ключи в `i18n/lang_strings.h`.
 - [ ] Persistence: `localStorage.theme/lang` → NVS (`nvs_worker.c`).
 
-### Фаза 7 — анимации (low priority)
-- [ ] Pipe-flow: бегущие капли поверх активной трубы (анимация по trail).
-- [ ] Recycle-march: anim на pipe-recycle dashed.
-- [ ] Tank-wave: oscillating translate.
-- [ ] Pump-spin: непрерывное вращение ротора.
-- [ ] Sensor-pulse (.danger): periodic stroke-width.
-- [ ] Учёт `prefers-reduced-motion` (через config-флаг, см. UI_SPEC §11).
+### Фаза 7 — анимации
+- [x] Pipe-flow: marching dashes overlay (white 70% opacity) поверх
+      active pipes. Реализовано через extended-line + translate_x/y по
+      направлению потока, clipping контейнером на bbox трубы.
+- [x] Recycle-march: animation translate на dashed pipe-recycle лини
+      (период 16 px, 1.6 s).
+- [x] Tank-wave: surface highlight (2px белая) translate_x -10..+10 за
+      5s с ease-in-out playback — "дышащая" поверхность воды.
+- [x] Pump-spin: непрерывное вращение ротора (transform_rotation) с
+      разной скоростью для running (1.5s) и starting (3s).
+- [x] Pump-pulse: opacity 100..50% для starting (1.2s) и error (1.0s)
+      состояний.
+- [x] Sensor-pulse (DANGER): opacity 100..40% на frame, 1.5s полный цикл
+      с ease-in-out playback. WARN остаётся статичным.
+- [ ] (TODO low) Учёт prefers-reduced-motion через config-флаг
+      (см. UI_SPEC §11). Сейчас все анимации всегда включены.
 
 ## Architecture decisions
 
