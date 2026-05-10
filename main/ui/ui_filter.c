@@ -48,6 +48,8 @@ lv_obj_t *ui_filter_create(lv_obj_t *parent, int cx, int cy, const char *subtitl
     lv_obj_set_style_transform_pivot_y(diamond, RECT_SIDE / 2, 0);
     lv_obj_set_style_transform_rotation(diamond, 450, 0);   /* 45.0° */
     lv_obj_remove_flag(diamond, LV_OBJ_FLAG_SCROLLABLE);
+    /* Клики на сам ромб → bubble to root для attach_equipment_click. */
+    lv_obj_add_flag(diamond, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     /* "Ф" letter — поверх ромба, центрирована, без поворота.
      * Создаётся как sibling diamond'а в root, чтобы не наследовать

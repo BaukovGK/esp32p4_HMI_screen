@@ -190,6 +190,8 @@ lv_obj_t *ui_sensor_create(lv_obj_t *parent, const ui_sensor_config_t *cfg)
     lv_obj_set_style_border_width(frame, 2, 0);
     lv_obj_set_style_pad_all(frame, 0, 0);
     lv_obj_remove_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    /* Клики на frame → bubble to root для ui_sensor_set_click_cb. */
+    lv_obj_add_flag(frame, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->frame = frame;
 
     /* Divider — горизонтальная линия по центру круга. */
@@ -201,6 +203,7 @@ lv_obj_t *ui_sensor_create(lv_obj_t *parent, const ui_sensor_config_t *cfg)
     lv_obj_set_style_radius(divider, 0, 0);
     lv_obj_set_style_pad_all(divider, 0, 0);
     lv_obj_remove_flag(divider, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(divider, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->divider = divider;
 
     /* Tag (имя прибора) — верхняя половина круга. */

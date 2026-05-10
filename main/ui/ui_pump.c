@@ -187,6 +187,9 @@ lv_obj_t *ui_pump_create(lv_obj_t *parent, const ui_pump_config_t *cfg)
     lv_obj_set_style_pad_all(shell, 0, 0);
     lv_obj_set_style_bg_opa(shell, LV_OPA_COVER, 0);
     lv_obj_remove_flag(shell, LV_OBJ_FLAG_SCROLLABLE);
+    /* Клики на shell должны передаваться root'у (для attach_equipment_click).
+     * По умолчанию lv_obj_create-children CLICKABLE, потребляют клик. */
+    lv_obj_add_flag(shell, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->shell = shell;
 
     /* rotor — container 36×36 в центре shell'а. Дочерние лопасти/хаб
@@ -198,6 +201,7 @@ lv_obj_t *ui_pump_create(lv_obj_t *parent, const ui_pump_config_t *cfg)
     lv_obj_set_style_border_width(rotor, 0, 0);
     lv_obj_set_style_pad_all(rotor, 0, 0);
     lv_obj_remove_flag(rotor, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(rotor, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->rotor = rotor;
 
     /* blade_h — горизонтальная лопасть. */
@@ -209,6 +213,7 @@ lv_obj_t *ui_pump_create(lv_obj_t *parent, const ui_pump_config_t *cfg)
     lv_obj_set_style_pad_all(blade_h, 0, 0);
     lv_obj_set_style_bg_opa(blade_h, LV_OPA_COVER, 0);
     lv_obj_remove_flag(blade_h, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(blade_h, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->blade_h = blade_h;
 
     /* blade_v — вертикальная лопасть. */
@@ -220,6 +225,7 @@ lv_obj_t *ui_pump_create(lv_obj_t *parent, const ui_pump_config_t *cfg)
     lv_obj_set_style_pad_all(blade_v, 0, 0);
     lv_obj_set_style_bg_opa(blade_v, LV_OPA_COVER, 0);
     lv_obj_remove_flag(blade_v, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(blade_v, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->blade_v = blade_v;
 
     /* hub — центральный круг. */
@@ -231,6 +237,7 @@ lv_obj_t *ui_pump_create(lv_obj_t *parent, const ui_pump_config_t *cfg)
     lv_obj_set_style_pad_all(hub, 0, 0);
     lv_obj_set_style_bg_opa(hub, LV_OPA_COVER, 0);
     lv_obj_remove_flag(hub, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(hub, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->hub = hub;
 
     /* label под кругом. */
