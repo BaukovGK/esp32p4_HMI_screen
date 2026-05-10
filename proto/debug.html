@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <title>RO HMI — Отладка</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .debug-grid {
+            display: grid;
+            grid-template-columns: 1fr 320px;
+            grid-template-rows: auto 1fr;
+            gap: var(--gap-md);
+            padding: var(--gap-md);
+            height: 100%;
+        }
+
+        /* left panel — scrollable log */
+        .log-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--gap-md);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap-md);
+            grid-row: 1 / 3;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .log-tabs {
+            display: flex;
+            gap: 4px;
+            background: var(--bg-mute);
+            padding: 4px;
+            border-radius: var(--radius-md);
+        }
+        .log-tab {
+            padding: 6px var(--gap-md);
+            font-size: var(--fs-sm);
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .log-tab.active {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .log-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap-sm);
+            padding-right: var(--gap-sm);
+        }
+
+        /* right column — diagnostic cards */
+        .diag-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: var(--fs-sm);
+        }
+        .diag-row:last-child { border: none; }
+        .diag-row .key { color: var(--text-secondary); }
+        .diag-row .val {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .device-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--fs-sm);
+        }
+        .device-table th, .device-table td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        .device-table th {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: var(--fs-xs);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .device-table tr:last-child td { border-bottom: none; }
+        .device-table .addr {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        .device-table .err { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .device-table .err.has-err { color: var(--warning); }
+    </style>
+</head>
+<body>
+
+<div class="screen">
+
+    <div class="statusbar">
+        <span class="sb-time">14:32:05</span>
+        <span class="sb-message" data-i18n="sb.system_idle">Система в готовности</span>
+        <div class="sb-controls">
+            <span class="sb-link sb-conn"><span class="dot"></span><span data-i18n="sb.online">Связь с хабом</span></span>
+            <button class="sb-btn" data-action="toggle-theme">☾</button>
+            <button class="sb-btn" data-action="toggle-lang">RU</button>
+        </div>
+    </div>
+
+    <div class="content">
+        <div class="debug-grid">
+
+            <!-- ───── log (left, full height) ───── -->
+            <div class="log-panel">
+                <div class="log-header">
+                    <h2 style="margin: 0; font-size: var(--fs-lg);" data-i18n="dbg.title">Журнал и диагностика</h2>
+                    <div class="log-tabs">
+                        <button class="log-tab active" data-i18n="dbg.alarms">Активные аварии</button>
+                        <button class="log-tab" data-i18n="dbg.history">История событий</button>
+                    </div>
+                </div>
+
+                <div class="log-list">
+                    <div class="alarm-row is-warning">
+                        <span class="alarm-time">14:31:48</span>
+                        <span class="alarm-msg"><span class="code">0x0050</span>WARNING — Засорение фильтра, ΔP=1.12 bar</span>
+                        <span><span class="badge badge-info">WARN</span></span>
+                        <span><button class="btn btn-secondary" style="height: 32px; min-width: 80px;">Заглушить</button></span>
+                    </div>
+                    <div class="alarm-row is-warning is-cleared">
+                        <span class="alarm-time">14:18:12</span>
+                        <span class="alarm-msg"><span class="code">0x00C6</span>WARNING — KWS-306L slave 21 offline (восстановлен 14:19:03)</span>
+                        <span><span class="badge badge-info">WARN</span></span>
+                        <span style="color: var(--text-muted); font-size: var(--fs-sm);">cleared</span>
+                    </div>
+                    <div class="alarm-row is-info is-cleared">
+                        <span class="alarm-time">14:00:01</span>
+                        <span class="alarm-msg"><span class="code">0x0001</span>INFO — Запуск AUTO режима оператором</span>
+                        <span><span class="badge badge-mute">INFO</span></span>
+                        <span style="color: var(--text-muted); font-size: var(--fs-sm);">—</span>
+                    </div>
+                    <div class="alarm-row is-info is-cleared">
+                        <span class="alarm-time">13:58:30</span>
+                        <span class="alarm-msg"><span class="code">0x0000</span>INFO — Контроллер подключился к MQTT</span>
+                        <span><span class="badge badge-mute">INFO</span></span>
+                        <span style="color: var(--text-muted); font-size: var(--fs-sm);">—</span>
+                    </div>
+                    <div class="alarm-row is-alarm is-cleared">
+                        <span class="alarm-time">10:42:22</span>
+                        <span class="alarm-msg"><span class="code">0x0042</span>ALARM — Превышение P3 > 35 bar (зафиксировано 38.1 bar)</span>
+                        <span><span class="badge badge-warn">ALARM</span></span>
+                        <span style="color: var(--text-muted); font-size: var(--fs-sm);">cleared</span>
+                    </div>
+                    <div class="alarm-row is-critical is-cleared">
+                        <span class="alarm-time">09:15:01</span>
+                        <span class="alarm-msg"><span class="code">0x0001</span>CRITICAL — Аварийный стоп (DI5)</span>
+                        <span><span class="badge badge-danger">CRIT</span></span>
+                        <span style="color: var(--text-muted); font-size: var(--fs-sm);">cleared</span>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; gap: var(--gap-sm); padding-top: var(--gap-sm); border-top: 1px solid var(--border);">
+                    <button class="btn btn-secondary" data-i18n="dbg.clear_log">Очистить лог</button>
+                </div>
+            </div>
+
+            <!-- ───── system diagnostics (right top) ───── -->
+            <div class="card">
+                <h3 class="card-title" data-i18n="dbg.diag">Диагностика</h3>
+                <div class="diag-row">
+                    <span class="key" data-i18n="dbg.fw_ver">Версия прошивки</span>
+                    <span class="val">v1.0.0-dev</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key" data-i18n="dbg.controller">Контроллер</span>
+                    <span class="val">v1.2.3 ✓</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key" data-i18n="dbg.uptime">Uptime</span>
+                    <span class="val" data-mock data-mock-base="3741" data-mock-decimals="0" data-mock-noise="0">01:02:21</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key" data-i18n="dbg.heap_free">Свободно heap</span>
+                    <span class="val"><span data-mock data-mock-base="156432" data-mock-decimals="0" data-mock-noise="0.05">156 432</span> B</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key" data-i18n="dbg.heap_min">Мин. heap</span>
+                    <span class="val">102 544 B</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key">Free PSRAM</span>
+                    <span class="val">31.2 MB</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key">MQTT msg total</span>
+                    <span class="val">14 528</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key">Unknown topics</span>
+                    <span class="val" style="color: var(--success);">0</span>
+                </div>
+                <div class="diag-row">
+                    <span class="key">Dropped alarms</span>
+                    <span class="val" style="color: var(--success);">0</span>
+                </div>
+            </div>
+
+            <!-- ───── modbus devices (right bottom) ───── -->
+            <div class="card">
+                <h3 class="card-title" data-i18n="dbg.modbus">Modbus устройства</h3>
+                <table class="device-table">
+                    <thead>
+                        <tr>
+                            <th data-i18n="dbg.device_addr">Адрес</th>
+                            <th>Имя</th>
+                            <th data-i18n="dbg.device_status">Статус</th>
+                            <th data-i18n="dbg.device_errors">Ош.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="addr">1</td><td>Waveshare AI</td><td><span class="badge badge-ok">●</span></td><td class="err">0</td></tr>
+                        <tr><td class="addr">2</td><td>УРЖ2КМ</td><td><span class="badge badge-ok">●</span></td><td class="err">0</td></tr>
+                        <tr><td class="addr">10</td><td>СЛ21 #10</td><td><span class="badge badge-ok">●</span></td><td class="err">0</td></tr>
+                        <tr><td class="addr">11</td><td>СЛ21 #11</td><td><span class="badge badge-ok">●</span></td><td class="err">0</td></tr>
+                        <tr><td class="addr">20</td><td>KWS НД</td><td><span class="badge badge-ok">●</span></td><td class="err">0</td></tr>
+                        <tr><td class="addr">21</td><td>KWS ВД</td><td><span class="badge badge-warn">●</span></td><td class="err has-err">3</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- tab bar -->
+    <div class="tabbar">
+        <a class="tab" href="index.html">
+            <span class="tab-icon">⌂</span>
+            <span class="tab-label" data-i18n="tab.main">Главная</span>
+        </a>
+        <a class="tab" href="washing.html">
+            <span class="tab-icon">⟲</span>
+            <span class="tab-label" data-i18n="tab.washing">Промывка</span>
+        </a>
+        <a class="tab" href="settings.html">
+            <span class="tab-icon">⚙</span>
+            <span class="tab-label" data-i18n="tab.settings">Настройки</span>
+        </a>
+        <a class="tab active" href="debug.html">
+            <span class="tab-icon">⚒</span>
+            <span class="tab-label" data-i18n="tab.debug">Отладка</span>
+        </a>
+    </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

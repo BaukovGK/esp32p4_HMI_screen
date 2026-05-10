@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <title>RO HMI — Промывка</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .wash-grid {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: var(--gap-md);
+            padding: var(--gap-md);
+            height: 100%;
+        }
+
+        /* Прогресс цикла */
+        .phase-track {
+            display: flex;
+            gap: var(--gap-sm);
+            margin-bottom: var(--gap-lg);
+        }
+        .phase-step {
+            flex: 1;
+            padding: var(--gap-md);
+            background: var(--bg-mute);
+            border: 2px solid transparent;
+            border-radius: var(--radius-md);
+            text-align: center;
+            position: relative;
+        }
+        .phase-step.active {
+            background: var(--accent-mute);
+            border-color: var(--accent);
+        }
+        .phase-step.done {
+            background: var(--success-bg);
+            border-color: var(--success);
+        }
+        .phase-step .num {
+            display: block;
+            font-size: var(--fs-2xl);
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+        .phase-step.active .num { color: var(--accent); }
+        .phase-step.done .num { color: var(--success); }
+        .phase-step .name {
+            font-size: var(--fs-sm);
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .phase-step.active .name { color: var(--text-primary); }
+        .phase-step .duration {
+            font-size: var(--fs-xs);
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Большой временной таймер */
+        .timer-block {
+            display: flex;
+            gap: var(--gap-xl);
+            justify-content: center;
+            margin: var(--gap-2xl) 0;
+        }
+        .timer-cell { text-align: center; }
+        .timer-cell .label {
+            font-size: var(--fs-sm);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .timer-cell .value {
+            font-size: 64px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-primary);
+            line-height: 1.1;
+        }
+        .timer-cell .value.warm { color: var(--warning); }
+
+        /* Температурный график (псевдо-текстовый) */
+        .temp-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--gap-2xl);
+            padding: var(--gap-lg);
+            background: var(--bg-mute);
+            border-radius: var(--radius-lg);
+        }
+        .temp-display .current {
+            font-size: 72px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: var(--warning);
+            line-height: 1;
+        }
+        .temp-display .target {
+            font-size: var(--fs-2xl);
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        .temp-display .arrow { font-size: 32px; color: var(--text-muted); }
+
+        /* Действия (правая колонка) */
+        .right-stack {
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap-md);
+            min-width: 0;
+        }
+        .right-stack .btn { width: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="screen">
+
+    <!-- status bar -->
+    <div class="statusbar">
+        <span class="sb-time">14:32:05</span>
+        <span class="sb-message is-warn" data-i18n="sb.system_washing">Идёт промывка</span>
+        <div class="sb-controls">
+            <span class="sb-link sb-conn"><span class="dot"></span><span data-i18n="sb.online">Связь с хабом</span></span>
+            <button class="sb-btn" data-action="toggle-theme">☾</button>
+            <button class="sb-btn" data-action="toggle-lang">RU</button>
+        </div>
+    </div>
+
+    <!-- content -->
+    <div class="content">
+        <div class="wash-grid">
+
+            <!-- ───── основная часть ───── -->
+            <div class="card" style="padding: var(--gap-xl); display: flex; flex-direction: column; gap: var(--gap-lg);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 class="card-title" style="font-size: var(--fs-lg); margin: 0;" data-i18n="wash.title">Режим промывки</h2>
+                    <span class="badge badge-warn" data-i18n="mode.washing">Мойка</span>
+                </div>
+
+                <!-- track фаз -->
+                <div class="phase-track">
+                    <div class="phase-step done">
+                        <span class="num">1</span>
+                        <span class="name" data-i18n="wash.phase_idle">Ожидание</span>
+                        <div class="duration">—</div>
+                    </div>
+                    <div class="phase-step active">
+                        <span class="num">2</span>
+                        <span class="name" data-i18n="wash.phase_heating">Нагрев</span>
+                        <div class="duration">30 мин</div>
+                    </div>
+                    <div class="phase-step">
+                        <span class="num">3</span>
+                        <span class="name" data-i18n="wash.phase_circulation">Подача</span>
+                        <div class="duration">20 мин</div>
+                    </div>
+                    <div class="phase-step">
+                        <span class="num">4</span>
+                        <span class="name" data-i18n="wash.phase_drain">Слив</span>
+                        <div class="duration">—</div>
+                    </div>
+                </div>
+
+                <!-- Temperature -->
+                <div class="temp-display">
+                    <div>
+                        <div class="kpi-label" data-i18n="wash.current_temp">Текущая темп.</div>
+                        <div class="current"><span data-mock data-mock-base="32.8" data-mock-decimals="1" data-mock-noise="0.03">32.8</span>°</div>
+                    </div>
+                    <div class="arrow">→</div>
+                    <div>
+                        <div class="kpi-label" data-i18n="wash.target_temp">Целевая темп.</div>
+                        <div class="target">35.0°</div>
+                    </div>
+                </div>
+
+                <!-- Timers -->
+                <div class="timer-block">
+                    <div class="timer-cell">
+                        <div class="label" data-i18n="wash.elapsed">Прошло</div>
+                        <div class="value">12:34</div>
+                    </div>
+                    <div class="timer-cell">
+                        <div class="label" data-i18n="wash.remaining">Осталось</div>
+                        <div class="value warm">17:26</div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- ───── правая колонка ───── -->
+            <div class="right-stack">
+
+                <div class="card">
+                    <h3 class="card-title">Состояние оборудования</h3>
+                    <div style="display: flex; flex-direction: column; gap: var(--gap-sm);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span data-i18n="main.pump_pre">Преднагнетания</span>
+                            <span class="badge badge-ok">ON</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Нагреватель (RO4)</span>
+                            <span class="badge badge-ok">ON</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span data-i18n="main.pump_st1">Насос 1-й ст.</span>
+                            <span class="badge badge-mute">OFF</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span data-i18n="main.pump_st2">Насос 2-й ст.</span>
+                            <span class="badge badge-mute">OFF</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span data-i18n="main.doser">Дозатор</span>
+                            <span class="badge badge-mute">OFF</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">Действия</h3>
+                    <div style="display: flex; flex-direction: column; gap: var(--gap-sm);">
+                        <button class="btn" disabled data-i18n="wash.start_heat">Начать нагрев</button>
+                        <button class="btn" data-confirm="confirm.start_auto" data-action="confirm_circ" data-i18n="wash.confirm_circ">Подтвердить подачу</button>
+                        <button class="btn btn-secondary" data-confirm="confirm.start_auto" data-action="confirm_drain" data-i18n="wash.confirm_drain">Подтвердить слив</button>
+                        <button class="btn btn-danger" data-confirm="confirm.cancel_wash" data-action="cancel_wash" data-i18n="wash.cancel">Отменить мойку</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3 class="card-title">Подсказка</h3>
+                    <p style="font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.5;">
+                        Когда нагрев достигнет уставки 35°C — переключите вручную клапаны на циркуляцию и нажмите «Подтвердить подачу».
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- tab bar -->
+    <div class="tabbar">
+        <a class="tab" href="index.html">
+            <span class="tab-icon">⌂</span>
+            <span class="tab-label" data-i18n="tab.main">Главная</span>
+        </a>
+        <a class="tab active" href="washing.html">
+            <span class="tab-icon">⟲</span>
+            <span class="tab-label" data-i18n="tab.washing">Промывка</span>
+        </a>
+        <a class="tab" href="settings.html">
+            <span class="tab-icon">⚙</span>
+            <span class="tab-label" data-i18n="tab.settings">Настройки</span>
+        </a>
+        <a class="tab" href="debug.html">
+            <span class="tab-icon">⚒</span>
+            <span class="tab-label" data-i18n="tab.debug">Отладка</span>
+        </a>
+    </div>
+
+</div>
+
+<div id="confirm-modal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-title" data-i18n="confirm.title">Подтвердите действие</div>
+        <div class="modal-text"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" data-modal="no" data-i18n="confirm.no">Отмена</button>
+            <button class="btn" data-modal="yes" data-i18n="confirm.yes">Да</button>
+        </div>
+    </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

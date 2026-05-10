@@ -1,0 +1,418 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * RO Plant HMI — прототип UI
+ * Целевой дисплей: Waveshare ESP32-P4-NANO 10.1" 1280×800 (landscape)
+ * Touch: GT911 polling (один палец), без жестов
+ * Темы: light (default) + dark, переключение через [data-theme]
+ * Языки: RU/EN через data-i18n + JS lookup
+ * ─────────────────────────────────────────────────────────────────────── */
+
+/* ───── design tokens ───── */
+:root {
+    /* Geometry — pixel-perfect for 1280×800 */
+    --screen-w: 1280px;
+    --screen-h: 800px;
+    --statusbar-h: 44px;
+    --tabbar-h: 64px;
+    --content-h: calc(var(--screen-h) - var(--statusbar-h) - var(--tabbar-h));
+
+    /* Touch targets — минимум 44×44 (Apple HIG), берём 60 для запаса */
+    --touch-min: 60px;
+    --touch-lg: 80px;
+
+    /* Type scale (без перчаток, с расстояния 30-70 см) */
+    --fs-xs: 12px;     /* подписи, единицы */
+    --fs-sm: 14px;     /* secondary text */
+    --fs-md: 16px;     /* body */
+    --fs-lg: 20px;     /* values, headings sm */
+    --fs-xl: 28px;     /* values primary */
+    --fs-2xl: 36px;    /* hero values */
+    --fs-3xl: 48px;    /* alarm */
+
+    /* Spacing */
+    --gap-xs: 4px;
+    --gap-sm: 8px;
+    --gap-md: 12px;
+    --gap-lg: 16px;
+    --gap-xl: 24px;
+    --gap-2xl: 32px;
+
+    /* Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+}
+
+/* ───── light theme (default) ───── */
+[data-theme="light"], :root {
+    --bg-base: #f5f7fa;
+    --bg-card: #ffffff;
+    --bg-elev: #ffffff;
+    --bg-mute: #eef0f3;
+
+    --text-primary: #1a1d23;
+    --text-secondary: #5a6068;
+    --text-muted: #8a9099;
+    --text-inverse: #ffffff;
+
+    --border: #d8dde2;
+    --border-strong: #b8bfc7;
+
+    --accent: #2563eb;          /* primary blue */
+    --accent-hover: #1d4ed8;
+    --accent-mute: #dbeafe;
+
+    --success: #16a34a;          /* green — ok */
+    --success-bg: #dcfce7;
+    --warning: #ca8a04;           /* amber — warning */
+    --warning-bg: #fef3c7;
+    --danger: #dc2626;             /* red — critical */
+    --danger-bg: #fee2e2;
+    --info: #0891b2;
+    --info-bg: #cffafe;
+
+    --pipe: #94a3b8;
+    --pipe-active: #2563eb;
+    --tank-stroke: #475569;
+    --tank-fill: #cbd5e1;
+    --water: #38bdf8;
+}
+
+/* ───── dark theme ───── */
+[data-theme="dark"] {
+    --bg-base: #0f1419;
+    --bg-card: #1a1f26;
+    --bg-elev: #232830;
+    --bg-mute: #161a20;
+
+    --text-primary: #e6e9ed;
+    --text-secondary: #a8aeb6;
+    --text-muted: #6c727b;
+    --text-inverse: #0f1419;
+
+    --border: #2c333d;
+    --border-strong: #3f4753;
+
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-mute: #1e3a8a;
+
+    --success: #22c55e;
+    --success-bg: #14532d;
+    --warning: #eab308;
+    --warning-bg: #422006;
+    --danger: #ef4444;
+    --danger-bg: #450a0a;
+    --info: #06b6d4;
+    --info-bg: #164e63;
+
+    --pipe: #64748b;
+    --pipe-active: #60a5fa;
+    --tank-stroke: #94a3b8;
+    --tank-fill: #2d3748;
+    --water: #38bdf8;
+}
+
+/* ───── reset + base ───── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+    width: 100%;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    font-size: var(--fs-md);
+    background: var(--bg-mute);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+}
+
+body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 20px;
+    background: #2a2f37;  /* viewer chrome — серый вокруг сцены */
+}
+
+/* ───── screen viewport ─────
+ * Имитирует физический дисплей 1280×800. На реальном LVGL это весь экран. */
+.screen {
+    position: relative;
+    width: var(--screen-w);
+    height: var(--screen-h);
+    background: var(--bg-base);
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px #1a1d23, 0 12px 60px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ───── status bar (top, 44px) ───── */
+.statusbar {
+    height: var(--statusbar-h);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 var(--gap-lg);
+    gap: var(--gap-lg);
+    flex-shrink: 0;
+}
+
+.sb-time {
+    font-size: var(--fs-md);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    min-width: 80px;
+}
+
+.sb-message {
+    flex: 1;
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sb-message.is-warn { color: var(--warning); }
+.sb-message.is-error { color: var(--danger); font-weight: 500; }
+
+.sb-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+}
+
+.sb-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-sm);
+    color: var(--text-secondary);
+}
+
+.sb-conn .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+}
+.sb-conn.is-offline .dot { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+.sb-btn {
+    height: 32px;
+    min-width: 48px;
+    padding: 0 var(--gap-md);
+    background: var(--bg-mute);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.sb-btn:active { background: var(--accent-mute); }
+
+/* ───── content area (724px) ───── */
+.content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* ───── tab bar (bottom, 64px) ───── */
+.tabbar {
+    height: var(--tabbar-h);
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-shrink: 0;
+}
+
+.tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: color 0.1s, background 0.1s;
+    text-decoration: none;
+    font-family: inherit;
+}
+.tab:active { background: var(--bg-mute); }
+.tab.active { color: var(--accent); background: var(--accent-mute); }
+.tab-icon { font-size: 22px; line-height: 1; }
+.tab-label { font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.3px; }
+
+/* ───── primary buttons (touch-friendly) ───── */
+.btn {
+    height: var(--touch-min);
+    min-width: 120px;
+    padding: 0 var(--gap-xl);
+    background: var(--accent);
+    color: var(--text-inverse);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.1s, transform 0.05s;
+    font-family: inherit;
+}
+.btn:active { background: var(--accent-hover); transform: scale(0.98); }
+.btn[disabled] { background: var(--bg-mute); color: var(--text-muted); cursor: not-allowed; }
+
+.btn-secondary {
+    background: var(--bg-mute);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+.btn-secondary:active { background: var(--bg-elev); }
+
+.btn-danger { background: var(--danger); }
+.btn-danger:active { background: #b91c1c; }
+
+.btn-success { background: var(--success); }
+.btn-success:active { background: #15803d; }
+
+.btn-lg { height: var(--touch-lg); min-width: 160px; font-size: var(--fs-lg); }
+
+/* ───── cards ───── */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--gap-lg);
+}
+
+.card-title {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: var(--gap-md);
+}
+
+/* ───── parameter chips (живые значения с цветовой индикацией) ───── */
+.kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--gap-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    min-width: 110px;
+}
+.kpi-label {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+}
+.kpi-value {
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+.kpi-unit {
+    font-size: var(--fs-xs);
+    color: var(--text-muted);
+    margin-left: 3px;
+    font-weight: 400;
+}
+.kpi.ok .kpi-value { color: var(--success); }
+.kpi.warn .kpi-value { color: var(--warning); }
+.kpi.danger .kpi-value { color: var(--danger); }
+.kpi.danger { border-color: var(--danger); animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--danger-bg); }
+    50% { box-shadow: 0 0 0 4px var(--danger-bg); }
+}
+
+/* ───── badges (state, mode) ───── */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.badge-ok    { background: var(--success-bg); color: var(--success); }
+.badge-warn  { background: var(--warning-bg); color: var(--warning); }
+.badge-danger{ background: var(--danger-bg); color: var(--danger); }
+.badge-info  { background: var(--info-bg); color: var(--info); }
+.badge-mute  { background: var(--bg-mute); color: var(--text-muted); }
+
+/* ───── modal / confirm dialog ───── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+    background: var(--bg-elev);
+    border-radius: var(--radius-lg);
+    padding: var(--gap-2xl);
+    min-width: 480px;
+    max-width: 700px;
+    box-shadow: 0 20px 80px rgba(0, 0, 0, 0.4);
+}
+.modal-title {
+    font-size: var(--fs-xl);
+    font-weight: 700;
+    margin-bottom: var(--gap-md);
+}
+.modal-text {
+    font-size: var(--fs-md);
+    color: var(--text-secondary);
+    margin-bottom: var(--gap-xl);
+    line-height: 1.5;
+}
+.modal-actions {
+    display: flex;
+    gap: var(--gap-md);
+    justify-content: flex-end;
+}
+
+/* ───── alarm row ───── */
+.alarm-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 100px 120px;
+    gap: var(--gap-md);
+    align-items: center;
+    padding: var(--gap-md) var(--gap-lg);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--gap-sm);
+}
+.alarm-row.is-critical { border-left: 4px solid var(--danger); }
+.alarm-row.is-alarm    { border-left: 4px solid var(--warning); }
+.alarm-row.is-warning  { border-left: 4px solid var(--info); }
+.alarm-row.is-info     { border-left: 4px solid var(--accent); }
+.alarm-row.is-cleared  { opacity: 0.55; }
+
+.alarm-time { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); color: var(--text-muted); }
+.alarm-msg  { font-size: var(--fs-md); }
+.alarm-msg .code { color: var(--text-muted); font-size: var(--fs-xs); margin-right: 6px; }
