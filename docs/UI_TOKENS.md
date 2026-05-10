@@ -128,7 +128,7 @@
 | Элемент | Min size | Recommended |
 |---|---:|---:|
 | **Кнопка primary** | 60×60 px | 60×120 px |
-| **Кнопка large** (важные команды: Пуск AUTO, Стоп) | 80×160 px | 80×200 px |
+| **Кнопка large** (LARGE primary, ныне только «Пуск AUTO») | 80×160 px | 80×200 px |
 | **Tab bar item** | 64×183 px | 64×183 px (1280/7) |
 | **Status bar button** | 32×48 px | 32×48 px |
 | **Number input ± кнопка** | 56×56 px | 56×56 px |
@@ -176,6 +176,12 @@
 | **screen change** | переход между экранами | НЕ используем (мгновенно) |
 | **flow-march** | имитация движения воды по активным трубам (sw-pipe-flow overlay) | 1400 мс цикл |
 | **recycle-march** | то же на dashed-линиях рециклов | 1600 мс цикл |
+| **sc-pulse** | бордер sensor-circle.danger + поплавок level-sw.alarm | 1500 мс цикл |
+| **pump-spin (run)** | вращение `.pump-rotor` в работающем насосе | 1500 мс linear infinite |
+| **pump-spin (start)** | вращение ротора при пуске (медленнее, индикация ramp-up) | 3000 мс linear infinite |
+| **pump-pulse-warn** | бордер `.pump-bg` в `.starting` (stroke-width 2 → 3.5) | 1200 мс ease-in-out |
+| **pump-pulse-err** | бордер `.pump-bg` в `.error` (stroke-width 2 → 4) | 1000 мс ease-in-out |
+| **tank-wave** | бегущая ripple-волна на поверхности воды (translateX 0 → -10) | 5000 мс ease-in-out |
 
 ### 6.1 Flow animation (движение воды по трубам)
 
@@ -304,6 +310,129 @@ void sensor_circle_set_offline(sensor_circle_t *sc, bool offline);
 - font-size единицы (опц.): 7 px
 
 При state=danger — `lv_anim_*` на stroke-width (2 → 3.5 → 2 cycle 1.5s).
+
+### 8.2.1 Pump-circle (centrifugal pump symbol)
+
+P&ID-стиль: круг + ротор с 4 wedge-blades. Геометрия фиксирована,
+управляется только class-state.
+
+| Token | Value |
+|---|---|
+| `--pump-r` | 26 px (внешний радиус `pump-bg`) |
+| `--pump-blade-r-outer` | 19 px (внешний радиус лопастей) |
+| `--pump-blade-arc` | ±7 px (полуширина лопасти у внешнего края) |
+| `--pump-hub-r` | 4 px |
+| `--pump-label-y` | +44 px от центра (подпись снизу) |
+| `--pump-label-fs` | 11 px / weight 600 |
+
+**Состояния:**
+
+| State | bg fill | bg stroke | rotor anim | bg pulse |
+|---|---|---|---|---|
+| `running`  | `url(#pumpGradRun)` | `var(--accent)` | `pump-spin 1.5s` | — |
+| `starting` | rgba(245,158,11,0.18) | `var(--warning)` | `pump-spin 3s` | `pump-pulse-warn 1.2s` |
+| `error`    | rgba(220,53,69,0.18) | `var(--danger)` | static | `pump-pulse-err 1s` |
+| `off`      | `var(--bg-mute)` | `var(--border-strong)` | static | — |
+
+**Градиент `pumpGradRun`** (radial, defs SVG):
+- 0% `#7fc89e` (light green)
+- 60% `#3fa66a` (mid)
+- 100% `#2d8659` (accent dark)
+
+**LVGL:** `lv_obj` с `lv_obj_set_style_radius(LV_RADIUS_CIRCLE)` + child
+канвас для импеллера; вращение через `lv_obj_set_style_transform_angle`
++ `lv_anim`. Все анимации отключаются при `s_reduce_motion`.
+
+### 8.2.2 Filter-diamond (упрощённый ISA-символ фильтра)
+
+Ромб 40×40 с буквой «Ф» внутри.
+
+| Token | Value |
+|---|---|
+| `--filter-half` | 20 px (полудиагональ) |
+| `--filter-letter-fs` | 14 px / weight 700, `text-anchor: middle`, `dominant-baseline: central` |
+| `--filter-fill` | `var(--bg-mute)` |
+| `--filter-stroke` | `var(--border-strong)` |
+| `--filter-stroke-w` | 2 px |
+
+Левая и правая вершины совпадают с осями входной/выходной труб —
+бесшовное соединение без stub-участков.
+
+### 8.2.3 Tank graphics (water-grad + wave + probe + level switches)
+
+Новый layered-look для ёмкостей. Структура (см. UI_SPEC §9.6):
+`<rect tank>` → clipped(`<rect tank-water-grad>` + `<path tank-wave-line>`)
+→ `<text tank-name>` → `<text tank-pct>` → `<line tank-probe>` →
+`<g level-sw>×N`.
+
+**`tankWaterGrad` (linear, vertical, defs):**
+
+| Stop | Light theme | Dark theme |
+|---|---|---|
+| 0% (поверхность) | `#7cc8f5` | `#7cc8f5` |
+| 100% (дно) | `#1f7cb8` | `#1f7cb8` |
+| opacity (`.tank-water-grad`) | 0.85 | 0.85 |
+
+(Градиент общий для обеих тем — синий чувствует себя одинаково на белом
+и тёмно-сером card-fone.)
+
+**`.tank-wave-line`:**
+
+| Token | Light | Dark |
+|---|---|---|
+| stroke | `#ffffff` | `#ffffff` |
+| stroke-width | 1.4 px | 1.4 px |
+| opacity | 0.55 | 0.4 |
+| animation | `tank-wave 5s ease-in-out infinite` | (то же, отключается на reduce-motion) |
+
+**`.tank-name`:** 11 px / weight 600 / `--text-primary` / `text-anchor: middle`,
+размещается в воздушной части над уровнем воды.
+
+**`.tank-pct`:** 12 px / weight 700 / tabular-nums / `--text-primary`,
+`paint-order: stroke; stroke: var(--bg-card); stroke-width: 3` —
+обводка-«хало» для читаемости поверх синего градиента.
+
+**`.tank-probe`:** `stroke: var(--tank-stroke); stroke-width: 1.5;
+opacity: 0.55; stroke-dasharray: 2 2; stroke-linecap: round` — пунктирный
+стержень с погружёнными датчиками.
+
+**`.level-sw .sw-dot`** (поплавковый датчик уровня):
+
+| State | fill | stroke | tag fill | Анимация |
+|---|---|---|---|---|
+| (default — сухой) | `var(--bg-card)` | `var(--text-muted)` | `var(--text-secondary)` | — |
+| `.active` (мокрый, контакт замкнут) | `var(--accent)` | `var(--accent)` | `var(--accent)` | — |
+| `.alarm` | `var(--danger)` | `var(--danger)` | `var(--danger)` | `sc-pulse 1.5s` (общий с sensor-danger) |
+
+**`.level-sw .sw-tag`:** 8 px / weight 700, letter-spacing 0.3 px,
+`text-anchor: start`, размещается справа от dot со смещением (6, 3).
+
+⚠️ **legacy class** `.tank-water` (плоская заливка) оставлен в CSS для
+обратной совместимости, но не используется в новой разметке —
+заменён на `.tank-water-grad`.
+
+### 8.2.4 Equipment-clickable (фильтр / насосы / мембраны)
+
+Хост-обёртка для интерактивных корпусов оборудования (sensor circles
+обрабатываются отдельно через `.sensor-group`). Открывает модал по
+типу (`filter | pump | membrane`) — см. UI_SPEC §10.4.
+
+| Token | Value |
+|---|---|
+| cursor | `pointer` |
+| hover filter | `brightness(1.08) drop-shadow(0 0 4px var(--accent))` |
+| focus | `outline: none` |
+| focus-visible stroke | `var(--accent-hover)` |
+| focus-visible stroke-width | 3 px |
+
+Hover применяется к `.filter-diamond`, `.equipment-active`, `.equipment-bg`,
+`.pump-bg` внутри `.equipment-clickable` — единая визуальная отдача
+для всех типов.
+
+**LVGL:** ставится как `lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE)` +
+event-handler `LV_EVENT_CLICKED` → `ui_show_equipment_modal(id)`.
+Hover-state имитируется через style на pressed-state (на тач-экране
+hover отсутствует, но focus-visible актуален при keyboard nav).
 
 ### 8.3 Стили компонентов
 

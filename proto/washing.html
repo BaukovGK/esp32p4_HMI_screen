@@ -8,100 +8,131 @@
         .wash-grid {
             display: grid;
             grid-template-columns: 1fr 380px;
+            /* row constrained к высоте контейнера (а не auto по контенту),
+             * иначе колонки расширяются и контент уходит под tabbar. */
+            grid-template-rows: minmax(0, 1fr);
             gap: var(--gap-md);
             padding: var(--gap-md);
             height: 100%;
+            min-height: 0;
+        }
+        /* Прямые потомки grid: позволяем им быть меньше своего контента
+         * (необходимо, чтобы overflow-y: auto заработал в grid-ячейке). */
+        .wash-grid > .card,
+        .wash-grid > .right-stack {
+            min-height: 0;
+            overflow-y: auto;
         }
 
-        /* Прогресс цикла */
+        /* Прогресс цикла — компактная горизонтальная плитка (4 шага в строку,
+         * каждый высотой ~36px). Содержит номер, название и длительность (если
+         * задана) в одну строку. Высота строки задаёт визуальный ритм. */
         .phase-track {
             display: flex;
-            gap: var(--gap-sm);
-            margin-bottom: var(--gap-lg);
+            gap: var(--gap-xs);
         }
         .phase-step {
             flex: 1;
-            padding: var(--gap-md);
+            padding: 6px var(--gap-sm);
             background: var(--bg-mute);
             border: 2px solid transparent;
             border-radius: var(--radius-md);
-            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 36px;
             position: relative;
+        }
+        .phase-step .num {
+            font-size: var(--fs-md);
+            font-weight: 700;
+            color: var(--text-muted);
+            line-height: 1;
+        }
+        .phase-step .name {
+            font-size: var(--fs-sm);
+            font-weight: 600;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .phase-step .duration {
+            font-size: var(--fs-xs);
+            color: var(--text-muted);
+            white-space: nowrap;
         }
         .phase-step.active {
             background: var(--accent-mute);
             border-color: var(--accent);
         }
+        .phase-step.active .num,
+        .phase-step.active .name { color: var(--accent); }
         .phase-step.done {
             background: var(--success-bg);
             border-color: var(--success);
         }
-        .phase-step .num {
-            display: block;
-            font-size: var(--fs-2xl);
-            font-weight: 700;
-            color: var(--text-muted);
-        }
-        .phase-step.active .num { color: var(--accent); }
-        .phase-step.done .num { color: var(--success); }
-        .phase-step .name {
-            font-size: var(--fs-sm);
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-        .phase-step.active .name { color: var(--text-primary); }
-        .phase-step .duration {
-            font-size: var(--fs-xs);
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
+        .phase-step.done .num,
+        .phase-step.done .name { color: var(--success); }
 
-        /* Большой временной таймер */
-        .timer-block {
+        /* Объединённая полоска статуса: время цикла + температура.
+         * Слева — таймеры (Прошло / Осталось), справа — температуры
+         * (Текущая / Целевая), разделены вертикальной чертой. Высота
+         * компактная (~56px), чтобы освободить место для мнемосхемы ниже. */
+        .info-strip {
             display: flex;
-            gap: var(--gap-xl);
-            justify-content: center;
-            margin: var(--gap-2xl) 0;
+            align-items: center;
+            justify-content: space-around;
+            gap: var(--gap-md);
+            padding: var(--gap-sm) var(--gap-lg);
+            background: var(--bg-mute);
+            border-radius: var(--radius-md);
+            min-height: 56px;
         }
-        .timer-cell { text-align: center; }
-        .timer-cell .label {
-            font-size: var(--fs-sm);
-            color: var(--text-muted);
+        .info-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 0;
+            line-height: 1.05;
+        }
+        .info-cell .label {
+            font-size: var(--fs-xs);
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            color: var(--text-muted);
         }
-        .timer-cell .value {
-            font-size: 64px;
+        .info-cell .value {
+            font-size: var(--fs-xl);          /* 28px */
             font-weight: 700;
             font-variant-numeric: tabular-nums;
             color: var(--text-primary);
-            line-height: 1.1;
         }
-        .timer-cell .value.warm { color: var(--warning); }
+        .info-cell .value.warm   { color: var(--warning); }
+        .info-cell .value.target { color: var(--text-secondary); font-weight: 600; }
+        .info-strip .divider {
+            width: 1px;
+            height: 36px;
+            background: var(--border);
+            align-self: center;
+        }
 
-        /* Температурный график (псевдо-текстовый) */
-        .temp-display {
+        /* Мнемосхема промывки — занимает остаток высоты карточки.
+         * Пока placeholder; будет заменена на SVG-схему контура промывки
+         * (циркуляция через мембрану 1+2, дозатор моющего раствора,
+         * клапаны/направления потоков в режиме CIP). */
+        .wash-mnemo {
+            flex: 1;
+            min-height: 120px;
+            background: var(--bg-mute);
+            border: 1px dashed var(--border-strong);
+            border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: var(--gap-2xl);
-            padding: var(--gap-lg);
-            background: var(--bg-mute);
-            border-radius: var(--radius-lg);
+            color: var(--text-muted);
+            font-size: var(--fs-sm);
+            font-style: italic;
         }
-        .temp-display .current {
-            font-size: 72px;
-            font-weight: 700;
-            font-variant-numeric: tabular-nums;
-            color: var(--warning);
-            line-height: 1;
-        }
-        .temp-display .target {
-            font-size: var(--fs-2xl);
-            color: var(--text-secondary);
-            font-variant-numeric: tabular-nums;
-        }
-        .temp-display .arrow { font-size: 32px; color: var(--text-muted); }
 
         /* Действия (правая колонка) */
         .right-stack {
@@ -110,7 +141,21 @@
             gap: var(--gap-md);
             min-width: 0;
         }
-        .right-stack .btn { width: 100%; }
+        /* Карточки правой колонки компактнее, чтобы все три помещались целиком
+         * (включая скруглённый низ "Подсказки") без overflow-clipping. */
+        .right-stack .card {
+            padding: var(--gap-md);
+        }
+        .right-stack .card-title {
+            margin-bottom: var(--gap-xs);   /* было gap-md (12px) → gap-xs (4px) */
+        }
+        /* Кнопки в карточке "Действия" — компактнее (40px вместо 60px),
+         * чтобы освободить вертикаль для блока с подсказкой. */
+        .right-stack .btn {
+            width: 100%;
+            height: 40px;
+            min-width: 0;
+        }
     </style>
 </head>
 <body>
@@ -133,59 +178,58 @@
         <div class="wash-grid">
 
             <!-- ───── основная часть ───── -->
-            <div class="card" style="padding: var(--gap-xl); display: flex; flex-direction: column; gap: var(--gap-lg);">
+            <div class="card" style="padding: var(--gap-md); display: flex; flex-direction: column; gap: var(--gap-md);">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h2 class="card-title" style="font-size: var(--fs-lg); margin: 0;" data-i18n="wash.title">Режим промывки</h2>
                     <span class="badge badge-warn" data-i18n="mode.washing">Мойка</span>
                 </div>
 
-                <!-- track фаз -->
+                <!-- 4 фазы цикла промывки — компактная плитка -->
                 <div class="phase-track">
                     <div class="phase-step done">
                         <span class="num">1</span>
                         <span class="name" data-i18n="wash.phase_idle">Ожидание</span>
-                        <div class="duration">—</div>
                     </div>
                     <div class="phase-step active">
                         <span class="num">2</span>
                         <span class="name" data-i18n="wash.phase_heating">Нагрев</span>
-                        <div class="duration">30 мин</div>
+                        <span class="duration">· 30 мин</span>
                     </div>
                     <div class="phase-step">
                         <span class="num">3</span>
                         <span class="name" data-i18n="wash.phase_circulation">Подача</span>
-                        <div class="duration">20 мин</div>
+                        <span class="duration">· 20 мин</span>
                     </div>
                     <div class="phase-step">
                         <span class="num">4</span>
                         <span class="name" data-i18n="wash.phase_drain">Слив</span>
-                        <div class="duration">—</div>
                     </div>
                 </div>
 
-                <!-- Temperature -->
-                <div class="temp-display">
-                    <div>
-                        <div class="kpi-label" data-i18n="wash.current_temp">Текущая темп.</div>
-                        <div class="current"><span data-mock data-mock-base="32.8" data-mock-decimals="1" data-mock-noise="0.03">32.8</span>°</div>
-                    </div>
-                    <div class="arrow">→</div>
-                    <div>
-                        <div class="kpi-label" data-i18n="wash.target_temp">Целевая темп.</div>
-                        <div class="target">35.0°</div>
-                    </div>
-                </div>
-
-                <!-- Timers -->
-                <div class="timer-block">
-                    <div class="timer-cell">
+                <!-- Объединённая полоска: таймеры цикла + температура -->
+                <div class="info-strip">
+                    <div class="info-cell">
                         <div class="label" data-i18n="wash.elapsed">Прошло</div>
                         <div class="value">12:34</div>
                     </div>
-                    <div class="timer-cell">
+                    <div class="info-cell">
                         <div class="label" data-i18n="wash.remaining">Осталось</div>
                         <div class="value warm">17:26</div>
                     </div>
+                    <div class="divider"></div>
+                    <div class="info-cell">
+                        <div class="label" data-i18n="wash.current_temp">Текущая</div>
+                        <div class="value warm"><span data-mock data-mock-base="32.8" data-mock-decimals="1" data-mock-noise="0.03">32.8</span>°</div>
+                    </div>
+                    <div class="info-cell">
+                        <div class="label" data-i18n="wash.target_temp">Целевая</div>
+                        <div class="value target">35.0°</div>
+                    </div>
+                </div>
+
+                <!-- Мнемосхема промывки (в разработке — см. UI_SCREENS §3.2 wash CIP loop) -->
+                <div class="wash-mnemo" data-i18n="wash.mnemo_placeholder">
+                    Мнемосхема промывки (в разработке)
                 </div>
 
             </div>

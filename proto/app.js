@@ -562,6 +562,321 @@ function showSensorDetail(tag) {
     });
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * EQUIPMENT DETAIL MODALS
+ * Открываются по клику на фильтр, насосы и мембраны на мнемосхеме.
+ * Используют тот же #sensor-modal (только innerHTML переписывается).
+ *
+ * Состав словаря equipmentMeta:
+ *   filter / pump-pre / pump-st1 / pump-st2 / membrane-1 / membrane-2
+ *
+ * Для прототипа значения наработки/ΔP — псевдо-данные. На целевом
+ * устройстве эти поля будут заполняться из контроллера через MQTT
+ * (топик ro/<id>/runtime, ro/<id>/state).
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+const equipmentMeta = {
+    'filter': {
+        kind: 'filter',
+        name_ru: 'Фильтр механической очистки',
+        name_en: 'Mechanical filter',
+        subtitle_ru: '5 мкм картридж',
+        subtitle_en: '5 μm cartridge',
+        delta_p: 0.32,           // bar (P1 - P2)
+        delta_p_warn: 0.5,
+        delta_p_alarm: 0.8,
+        runtime_h: 1284,         // часы наработки картриджа
+        runtime_max_h: 2000,     // ресурс картриджа
+        last_replaced: '2026-03-15',
+    },
+    'pump-pre': {
+        kind: 'pump',
+        name_ru: 'Преднагнетательный насос',
+        name_en: 'Pre-feed pump',
+        subtitle_ru: 'RO1 · DI6',
+        subtitle_en: 'RO1 · DI6',
+        model: 'Grundfos CR 3-4',
+        rated_q: '4 м³/ч',
+        rated_p: '4 bar',
+        state: 'running',
+        run_continuous_h: 8.4,
+        run_total_h: 4521,
+        starts: 1247,
+        last_start: '2026-05-10 06:08',
+    },
+    'pump-st1': {
+        kind: 'pump',
+        name_ru: 'Насос 1-й ступени',
+        name_en: 'Stage-1 pump',
+        subtitle_ru: 'RO2 · DI7',
+        subtitle_en: 'RO2 · DI7',
+        model: 'Grundfos BMG 4-15',
+        rated_q: '4 м³/ч',
+        rated_p: '30 bar',
+        state: 'running',
+        run_continuous_h: 8.4,
+        run_total_h: 4380,
+        starts: 1108,
+        last_start: '2026-05-10 06:08',
+    },
+    'pump-st2': {
+        kind: 'pump',
+        name_ru: 'Насос 2-й ступени',
+        name_en: 'Stage-2 pump',
+        subtitle_ru: 'RO3 · DI8',
+        subtitle_en: 'RO3 · DI8',
+        model: 'Grundfos CRN 5-12',
+        rated_q: '2.5 м³/ч',
+        rated_p: '8 bar',
+        state: 'running',
+        run_continuous_h: 8.4,
+        run_total_h: 4290,
+        starts: 1095,
+        last_start: '2026-05-10 06:08',
+    },
+    'membrane-1': {
+        kind: 'membrane',
+        name_ru: 'Мембрана 1-й ступени',
+        name_en: 'Stage-1 membrane',
+        subtitle_ru: '2 элемента 4040',
+        subtitle_en: '2 × 4040 elements',
+        type_ru: 'Обратноосмотический модуль (BW)',
+        type_en: 'RO module (BW)',
+        rejection: 99.2,         // % NaCl
+        last_wash: '2026-04-12',
+        run_since_wash_h: 678,
+        run_since_wash_warn_h: 720,   // плановая промывка после ~30 дней
+        run_total_h: 9412,
+        run_max_h: 20000,        // ресурс мембраны
+    },
+    'membrane-2': {
+        kind: 'membrane',
+        name_ru: 'Мембрана 2-й ступени',
+        name_en: 'Stage-2 membrane',
+        subtitle_ru: '2 элемента 4040',
+        subtitle_en: '2 × 4040 elements',
+        type_ru: 'Обратноосмотический модуль (BW)',
+        type_en: 'RO module (BW)',
+        rejection: 99.5,
+        last_wash: '2026-04-12',
+        run_since_wash_h: 678,
+        run_since_wash_warn_h: 720,
+        run_total_h: 9412,
+        run_max_h: 20000,
+    },
+};
+
+/* Часы → "1284 ч (53 дн)" */
+function formatHours(h) {
+    if (h == null || isNaN(h)) return '—';
+    if (h < 24) return `${h.toFixed(1)} ч`;
+    const days = Math.floor(h / 24);
+    return `${h.toFixed(0)} ч (${days} дн)`;
+}
+
+/* Прогресс-бар [0..100%] с цветом по состоянию */
+function renderProgressBar(pct, state /* 'ok'|'warn'|'danger' */) {
+    const color = state === 'danger' ? 'var(--danger)' :
+                  state === 'warn'   ? 'var(--warning)' : 'var(--accent)';
+    const w = Math.max(0, Math.min(100, pct));
+    return `
+        <div class="sm-range-bar" style="background: var(--bg-mute); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="width: ${w}%; height: 100%; background: ${color}; transition: width 0.4s ease;"></div>
+        </div>
+    `;
+}
+
+function classifyByThresholds(value, warn, alarm) {
+    if (alarm != null && value >= alarm) return 'danger';
+    if (warn  != null && value >= warn)  return 'warn';
+    return 'ok';
+}
+
+/* ─── ФИЛЬТР ─────────────────────────────────────────────────── */
+function renderFilterModal(meta, lang) {
+    const name = lang === 'ru' ? meta.name_ru : meta.name_en;
+    const sub  = lang === 'ru' ? meta.subtitle_ru : meta.subtitle_en;
+    const dpState = classifyByThresholds(meta.delta_p, meta.delta_p_warn, meta.delta_p_alarm);
+    const dpStateLabel = { ok: 'НОРМА', warn: 'ПРЕДУПРЕЖДЕНИЕ', danger: 'АВАРИЯ' }[dpState];
+    const dpBadge = { ok: 'ok', warn: 'warn', danger: 'danger' }[dpState];
+
+    const runtimePct = (meta.runtime_h / meta.runtime_max_h) * 100;
+    const runtimeState = runtimePct >= 95 ? 'danger' : runtimePct >= 80 ? 'warn' : 'ok';
+    const remainingH = Math.max(0, meta.runtime_max_h - meta.runtime_h);
+
+    return `
+        <div class="sm-header">
+            <div>
+                <div class="sm-title">Фильтр — ${name}</div>
+                <div class="sm-subtitle">${sub}</div>
+            </div>
+            <button class="sm-close" data-modal="close">×</button>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">ΔP — перепад давления (P1 − P2)</div>
+            <div class="sm-current ${dpState}">
+                <span class="sm-current-value">${meta.delta_p.toFixed(2)}</span>
+                <span class="sm-current-unit">bar</span>
+                <span class="badge badge-${dpBadge}" style="margin-left:auto;">${dpStateLabel}</span>
+            </div>
+            <div class="sm-prop-row"><span class="key">Норма</span><span class="val">< ${meta.delta_p_warn} bar</span></div>
+            <div class="sm-prop-row"><span class="key">Предупреждение</span><span class="val">${meta.delta_p_warn}–${meta.delta_p_alarm} bar</span></div>
+            <div class="sm-prop-row"><span class="key">АВАРИЯ (засорение)</span><span class="val">> ${meta.delta_p_alarm} bar</span></div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Наработка картриджа</div>
+            <div class="sm-current ${runtimeState}">
+                <span class="sm-current-value">${formatHours(meta.runtime_h)}</span>
+                <span class="sm-current-unit">/ ${formatHours(meta.runtime_max_h)}</span>
+                <span class="badge badge-${runtimeState === 'ok' ? 'ok' : runtimeState === 'warn' ? 'warn' : 'danger'}" style="margin-left:auto;">${runtimePct.toFixed(0)}%</span>
+            </div>
+            ${renderProgressBar(runtimePct, runtimeState)}
+            <div class="sm-prop-row"><span class="key">До замены</span><span class="val">${formatHours(remainingH)}</span></div>
+            <div class="sm-prop-row"><span class="key">Установлен</span><span class="val">${meta.last_replaced}</span></div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn" data-modal="close">Закрыть</button>
+        </div>
+    `;
+}
+
+/* ─── НАСОС ──────────────────────────────────────────────────── */
+function renderPumpModal(meta, lang) {
+    const name = lang === 'ru' ? meta.name_ru : meta.name_en;
+    const sub  = lang === 'ru' ? meta.subtitle_ru : meta.subtitle_en;
+    const stateLabel = {
+        running:  { ru: 'РАБОТАЕТ',     en: 'RUNNING',   badge: 'ok'    },
+        starting: { ru: 'ПУСК',         en: 'STARTING',  badge: 'warn'  },
+        error:    { ru: 'АВАРИЯ',       en: 'ERROR',     badge: 'danger'},
+        off:      { ru: 'ОСТАНОВЛЕН',   en: 'STOPPED',   badge: 'mute'  },
+    }[meta.state] || { ru: '—', en: '—', badge: 'mute' };
+
+    return `
+        <div class="sm-header">
+            <div>
+                <div class="sm-title">${name}</div>
+                <div class="sm-subtitle">${sub} · ${meta.model}</div>
+            </div>
+            <button class="sm-close" data-modal="close">×</button>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Состояние</div>
+            <div class="sm-current ${meta.state === 'running' ? 'ok' : meta.state === 'error' ? 'danger' : 'warn'}">
+                <span class="sm-current-value" style="font-size: 22px;">${lang === 'ru' ? stateLabel.ru : stateLabel.en}</span>
+                <span class="badge badge-${stateLabel.badge}" style="margin-left:auto;">${meta.state.toUpperCase()}</span>
+            </div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Время работы</div>
+            <div class="sm-prop-row"><span class="key">В текущем цикле</span><span class="val">${formatHours(meta.run_continuous_h)}</span></div>
+            <div class="sm-prop-row"><span class="key">Запуск цикла</span><span class="val">${meta.last_start}</span></div>
+            <div class="sm-prop-row"><span class="key">Общая наработка</span><span class="val">${formatHours(meta.run_total_h)}</span></div>
+            <div class="sm-prop-row"><span class="key">Количество пусков</span><span class="val">${meta.starts}</span></div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Характеристики</div>
+            <div class="sm-prop-row"><span class="key">Модель</span><span class="val">${meta.model}</span></div>
+            <div class="sm-prop-row"><span class="key">Q ном</span><span class="val">${meta.rated_q}</span></div>
+            <div class="sm-prop-row"><span class="key">P ном</span><span class="val">${meta.rated_p}</span></div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn" data-modal="close">Закрыть</button>
+        </div>
+    `;
+}
+
+/* ─── МЕМБРАНА ───────────────────────────────────────────────── */
+function renderMembraneModal(meta, lang) {
+    const name = lang === 'ru' ? meta.name_ru : meta.name_en;
+    const sub  = lang === 'ru' ? meta.subtitle_ru : meta.subtitle_en;
+    const type = lang === 'ru' ? meta.type_ru  : meta.type_en;
+
+    /* Наработка от последней промывки: warn после run_since_wash_warn_h */
+    const washPct = (meta.run_since_wash_h / meta.run_since_wash_warn_h) * 100;
+    const washState = washPct >= 100 ? 'danger' : washPct >= 80 ? 'warn' : 'ok';
+    const washRemainingH = Math.max(0, meta.run_since_wash_warn_h - meta.run_since_wash_h);
+
+    /* Общая наработка vs ресурс */
+    const totalPct = (meta.run_total_h / meta.run_max_h) * 100;
+    const totalState = totalPct >= 95 ? 'danger' : totalPct >= 80 ? 'warn' : 'ok';
+    const totalRemainingH = Math.max(0, meta.run_max_h - meta.run_total_h);
+
+    return `
+        <div class="sm-header">
+            <div>
+                <div class="sm-title">${name}</div>
+                <div class="sm-subtitle">${sub}</div>
+            </div>
+            <button class="sm-close" data-modal="close">×</button>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Селективность по NaCl (rejection)</div>
+            <div class="sm-current ok">
+                <span class="sm-current-value">${meta.rejection.toFixed(1)}</span>
+                <span class="sm-current-unit">%</span>
+                <span class="badge badge-ok" style="margin-left:auto;">НОРМА</span>
+            </div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Наработка от последней промывки</div>
+            <div class="sm-current ${washState}">
+                <span class="sm-current-value">${formatHours(meta.run_since_wash_h)}</span>
+                <span class="sm-current-unit">/ ${formatHours(meta.run_since_wash_warn_h)}</span>
+                <span class="badge badge-${washState === 'ok' ? 'ok' : washState === 'warn' ? 'warn' : 'danger'}" style="margin-left:auto;">${washPct.toFixed(0)}%</span>
+            </div>
+            ${renderProgressBar(washPct, washState)}
+            <div class="sm-prop-row"><span class="key">Последняя промывка</span><span class="val">${meta.last_wash}</span></div>
+            <div class="sm-prop-row"><span class="key">До плановой промывки</span><span class="val">${formatHours(washRemainingH)}</span></div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Общее время работы</div>
+            <div class="sm-current ${totalState}">
+                <span class="sm-current-value">${formatHours(meta.run_total_h)}</span>
+                <span class="sm-current-unit">/ ${formatHours(meta.run_max_h)}</span>
+                <span class="badge badge-${totalState === 'ok' ? 'ok' : totalState === 'warn' ? 'warn' : 'danger'}" style="margin-left:auto;">${totalPct.toFixed(0)}%</span>
+            </div>
+            ${renderProgressBar(totalPct, totalState)}
+            <div class="sm-prop-row"><span class="key">Ресурс остался</span><span class="val">${formatHours(totalRemainingH)}</span></div>
+            <div class="sm-prop-row"><span class="key">Тип</span><span class="val">${type}</span></div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn" data-modal="close">Закрыть</button>
+        </div>
+    `;
+}
+
+/* ─── Диспетчер по типу оборудования ──────────────────────────── */
+function showEquipmentDetail(equipmentId) {
+    const meta = equipmentMeta[equipmentId];
+    if (!meta) return;
+    const lang = localStorage.getItem('hmi.lang') || 'ru';
+    const m = document.getElementById('sensor-modal');
+    if (!m) return;
+
+    let html;
+    if (meta.kind === 'filter')        html = renderFilterModal(meta, lang);
+    else if (meta.kind === 'pump')     html = renderPumpModal(meta, lang);
+    else if (meta.kind === 'membrane') html = renderMembraneModal(meta, lang);
+    else return;
+
+    m.querySelector('.sensor-modal').innerHTML = html;
+    m.classList.add('open');
+    m.querySelectorAll('[data-modal="close"]').forEach(btn => {
+        btn.addEventListener('click', () => m.classList.remove('open'), { once: true });
+    });
+}
+
 /* ───── boot ───── */
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(localStorage.getItem('hmi.theme') || 'light');
@@ -582,6 +897,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // прямая навигация (например: кнопка Промывка → washing.html без confirm)
+    document.querySelectorAll('[data-href]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            window.location.href = btn.getAttribute('data-href');
+        });
+    });
+
     // sensor circles → детальный модал
     document.querySelectorAll('.mnemo-svg .sensor-group').forEach(g => {
         g.addEventListener('click', () => {
@@ -589,6 +911,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!tagEl) return;
             const tag = tagEl.textContent.trim();
             showSensorDetail(tag);
+        });
+    });
+
+    // equipment (filter, pumps, membranes) → детальный модал
+    document.querySelectorAll('.mnemo-svg [data-equipment]').forEach(el => {
+        el.addEventListener('click', e => {
+            // если клик прилетел из вложенного sensor-group, не перехватываем
+            if (e.target.closest('.sensor-group')) return;
+            const id = el.getAttribute('data-equipment');
+            showEquipmentDetail(id);
         });
     });
 

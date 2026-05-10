@@ -386,9 +386,10 @@ flow. Оператор может посмотреть его на экране 
 
 | Элемент | Стандарт | Реализация в прототипе |
 |---|---|---|
-| **Ёмкости** | Прямоугольник со скруглением + заливка по уровню воды | `<rect class="tank">` + `<rect class="tank-water">` |
-| **Насосы** | Прямоугольник + цветовое кодирование (RUN/OFF/ERR) | `<rect class="equipment-active">` (зелёный) или `equipment-bg` (серый) |
-| **Мембраны** | Прямоугольник с разделительной линией внутри | `<rect>` + `<line dasharray>` (показывает мембранный слой) |
+| **Ёмкости** | Прямоугольник со скруглением, водо-градиент + волна на поверхности + стержень-зонд с поплавковыми датчиками | `<g class="tank-group">` (см. §9.6) |
+| **Насосы** | P&ID centrifugal pump symbol — круг + импеллер из 4 лопастей с цветовым кодированием (RUN/STARTING/ERR/OFF) | `<g class="pump-circle [state]">` r=26 (см. §9.5) |
+| **Фильтр** | Ромб (упрощённый ISA-символ механического фильтра) с буквой «Ф» внутри | `<polygon class="filter-diamond">` 40×40 + `.filter-letter` |
+| **Мембраны** | Прямоугольник с разделительной линией внутри | `<rect class="equipment-active">` 120×60 + `<line dasharray>` |
 | **Приборы (датчики)** | **Круг** диаметром ≈11–13 мм с тегом сверху и значением снизу | `<g class="sensor-circle">` с `<circle r="22">` (44 px) |
 | **Точки врезки** | Маленький filled circle на трубе | `<circle class="sc-tap" r="3.5">` |
 | **Leader-line** | Тонкая линия от прибора до tap-point | `<line class="sc-leader" stroke-width="1">` |
@@ -396,6 +397,11 @@ flow. Оператор может посмотреть его на экране 
 | **Активный поток** | Линия с анимацией движения воды | `<line class="pipe-active">` + `<line class="pipe-flow">` overlay |
 | **Неактивный** | Серая сплошная линия | `<line class="pipe">` |
 | **Рецикл/концентрат** | Бирюзовая dashed-линия | `<line class="pipe-recycle">` (с анимацией если flowing) |
+
+⚠️ **viewBox прототипа:** `0 30 900 530` (`preserveAspectRatio="xMidYMin meet"`).
+Кадр обрезан на 30 px сверху относительно прежнего `0 0 900 560` — это
+освободило горизонталь Y=30..50 для Q2 над петлёй рецикла 1 (центр круга
+теперь Y=55).
 
 ### 9.2 Анимация движения потока
 
@@ -418,13 +424,23 @@ flow. Оператор может посмотреть его на экране 
 
 ```
 Рецикл 1ст: над row 1 (петля Y=100..210, через зону между мембраной 1 и насосом 1)
-Рецикл 2ст: под row 2 (петля Y=350..470, через зону между мембраной 2 и насосом 2)
+Рецикл 2ст: под row 2 (петля Y=350..455, через зону между мембраной 2 и насосом 2)
 ```
 
 Подключение к main pipes — через **junctions на трубопроводе**, не на крае
-блоков. Между блоком и junction есть короткая `pipe-active` outlet-труба
-(60 px для рецикла 1ст, 30 px для рецикла 2ст) — показывает что
-концентрат покидает мембрану по своей трубе.
+блоков.
+
+**Источники концентрата (асимметричные):**
+- **Рецикл 1ст** — выходит из top-edge мембраны 1 в (650, 180). Между
+  мембраной и петлёй нет stub-трубы; pipe-recycle стартует прямо на блоке.
+  Дренаж 1ст — отдельная серая `pipe` с right-edge в (710, 210).
+- **Рецикл 2ст** — выходит из **bottom-center мембраны 2** в (280, 380).
+  Тоже без pipe-active stub и без junction-маркера на источнике
+  (симметрично с рециклом 1). На 2-й ступени дренажа нет, поэтому весь
+  концентрат уходит на рецикл — отдельная труба не нужна.
+
+Вся петля каждого рецикла — единый `pipe-recycle flowing` без перехода
+класса mid-pipe.
 
 ### 9.4 Приборные индикаторы — состояния
 
@@ -437,6 +453,154 @@ flow. Оператор может посмотреть его на экране 
 
 Все 4 элемента группы (`.sensor-group .sc-frame .sc-divider .sc-leader .sc-tap`)
 перекрашиваются согласованно при смене состояния.
+
+### 9.5 Насос — centrifugal pump symbol
+
+Заменяет старый `<rect class="equipment-active">` для насосов.
+Структура SVG-группы (`<g class="pump-circle [state]" transform="translate(cx,cy)">`):
+
+```
+<g class="pump-circle running" transform="translate(178,210)">
+  <circle class="pump-bg" r="26"/>           <!-- корпус -->
+  <g class="pump-rotor">                      <!-- крутящаяся часть -->
+    <path class="pump-blade" d="M0,0 L18,-7 A19,19 0 0,1 18,7 Z"/>
+    <path class="pump-blade" d="M0,0 L7,18 A19,19 0 0,1 -7,18 Z"/>
+    <path class="pump-blade" d="M0,0 L-18,7 A19,19 0 0,1 -18,-7 Z"/>
+    <path class="pump-blade" d="M0,0 L-7,-18 A19,19 0 0,1 7,-18 Z"/>
+    <circle class="pump-hub" r="4"/>
+  </g>
+  <text class="pump-label" y="44">…</text>    <!-- подпись снизу -->
+</g>
+```
+
+`transform-box: fill-box; transform-origin: center` на `.pump-rotor` —
+вращение вокруг центра bbox группы.
+
+**Состояния и анимация:**
+
+| Класс | `pump-bg` fill | `pump-bg` stroke | rotor anim | bg pulse |
+|---|---|---|---|---|
+| `.running`  | `url(#pumpGradRun)` (light→dark green radial) | accent | `pump-spin 1.5s linear infinite` | — |
+| `.starting` | rgba(245, 158, 11, 0.18) | warning | `pump-spin 3s linear infinite` | `pump-pulse-warn 1.2s` |
+| `.error`    | rgba(220, 53, 69, 0.18) | danger | static | `pump-pulse-err 1s` |
+| `.off`      | bg-mute | border-strong | static | — |
+
+`pump-spin` — `transform: rotate(0 → 360deg)`. `pump-pulse-warn/err` —
+`stroke-width: 2 → 3.5/4 → 2`. На `prefers-reduced-motion: reduce` все
+анимации насоса (`pump-rotor` и `pump-bg`) отключаются.
+
+**Градиент `pumpGradRun`** определён в SVG `<defs>`:
+```
+<radialGradient id="pumpGradRun" cx="50%" cy="50%" r="50%">
+  <stop offset="0%"   stop-color="#7fc89e"/>
+  <stop offset="60%"  stop-color="#3fa66a"/>
+  <stop offset="100%" stop-color="#2d8659"/>
+</radialGradient>
+```
+
+**LVGL-портирование:** `lv_obj` с `lv_obj_set_style_radius(LV_RADIUS_CIRCLE)` для
+фона + child object с импеллером (lv_canvas или 4 path-rect). Ротация —
+`lv_obj_set_style_transform_angle` через `lv_anim`. Градиент — через
+`lv_grad_radial` (в LVGL 9.2 поддержано).
+
+### 9.6 Ёмкости — расширенная графика
+
+Заменяет минимальную пару `<rect class="tank">` + `<rect class="tank-water">`.
+Структура SVG-группы:
+
+```
+<g class="tank-group">
+  <rect class="tank" x="…" y="…" width="…" height="…" rx="8"/>
+
+  <g clip-path="url(#clip-…-tank)">
+    <rect class="tank-water-grad"
+          x="…" y="<уровень>" width="…" height="<остаток>"/>
+    <path class="tank-wave-line"
+          d="M…,Q… T… T…"/>
+  </g>
+
+  <text class="tank-name" x="<center>" y="…">Исходная</text>
+  <text class="tank-pct"  x="<center>" y="…">62%</text>
+
+  <line class="tank-probe" x1="…" y1="…" x2="…" y2="…"/>
+  <g class="level-sw [.active|.alarm]" transform="translate(x,y)">
+    <circle class="sw-dot" r="3.5"/>
+    <text class="sw-tag" x="6" y="3">DI1</text>
+  </g>
+  …
+</g>
+```
+
+**clip-path** для каждой ёмкости определена в `<defs>` отдельно (форма
+повторяет внешний `<rect class="tank">`).
+
+**`tank-water-grad`:** `fill: url(#tankWaterGrad)`, opacity 0.85.
+Градиент:
+```
+<linearGradient id="tankWaterGrad" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0%"   stop-color="#7cc8f5"/>  <!-- светло-голубой у поверхности -->
+  <stop offset="100%" stop-color="#1f7cb8"/>  <!-- тёмно-синий у дна -->
+</linearGradient>
+```
+
+**`tank-wave-line`:** белая линия `stroke: #ffffff`, opacity 0.55 (light)
+/ 0.4 (dark), `stroke-width: 1.4`. SVG-`<path>` рисует синусоиду по
+поверхности воды; через `transform-box: fill-box` + animation
+`tank-wave 5s ease-in-out infinite` (translate X 0 → -10 → 0) даёт
+плавающую волну. Отключается по `prefers-reduced-motion`.
+
+**`tank-name`:** 11 px, weight 600, `text-anchor: middle`, размещается
+внутри воздушной части (выше уровня воды).
+
+**`tank-pct`:** 12 px, weight 700, tabular-nums, размещается на воде.
+Использует `paint-order: stroke` + `stroke: var(--bg-card)` `width 3` —
+это создаёт обводку-«хало» вокруг текста, чтобы было читаемо поверх
+синего градиента в любой теме.
+
+**`tank-probe`:** вертикальная пунктирная линия (`stroke-dasharray: 2 2`,
+opacity 0.55) — стержень с погружёнными датчиками.
+
+**`level-sw`** (поплавковый датчик уровня) — состояния:
+
+| Класс | `sw-dot` fill | `sw-dot` stroke | `sw-tag` fill | Анимация |
+|---|---|---|---|---|
+| (default — сухой) | bg-card | text-muted | text-secondary | — |
+| `.active` (мокрый/контакт) | accent | accent | accent | — |
+| `.alarm` | danger | danger | danger | `sc-pulse 1.5s` (общий с sensor-danger) |
+
+**Расположение датчиков по ёмкостям прототипа:**
+- Исходная (80×80, ~62%): DI1 (low, **active**)
+- Промежуточная (160×80, ~69%): DI3 (high, dry) + DI2 (low, **active**)
+- Чистая (80×80, ~62%): DI4 (high, dry — не доведено до отметки)
+
+⚠️ **legacy-class** `.tank-water` оставлен в CSS для обратной совместимости,
+но в новой разметке не используется (заменён на `.tank-water-grad`).
+
+### 9.7 Фильтр — ромб с «Ф»
+
+Упрощённый ISA-символ механического фильтра — ромб 40×40, центр на трубе,
+буква «Ф» внутри:
+
+```
+<g class="equipment-clickable" data-equipment="filter">
+  <polygon class="filter-diamond" points="330,190 350,210 330,230 310,210"/>
+  <text class="filter-letter" x="330" y="210">Ф</text>
+  <text class="label-sm" x="330" y="248" text-anchor="middle">Фильтр</text>
+</g>
+```
+
+CSS:
+```
+.filter-diamond { fill: var(--bg-mute); stroke: var(--border-strong); stroke-width: 2; }
+.filter-letter  { fill: var(--text-primary); font-size: 14px; font-weight: 700;
+                  text-anchor: middle; dominant-baseline: central; }
+```
+
+Левая и правая вершины ромба совпадают с концами входной и выходной
+труб (X=310, X=350) — визуально бесшовное соединение. Размер сокращён
+вдвое относительно прежнего `<rect>` 80×80 — освобождён горизонтальный
+интервал для P1 (X=235) и Q1 (X=290) над трубой между Преднагн и
+фильтром.
 
 ---
 
@@ -525,6 +689,84 @@ typedef struct {
 - Один series на датчик
 - Обновление — `lv_chart_set_next_value` каждые 3 минуты
 
+### 10.4 Клик на оборудование → детальный модал
+
+Помимо приборных кругов кликабельны **корпуса оборудования**: фильтр,
+все 3 насоса, обе мембраны. Каждый блок обёрнут в:
+
+```
+<g class="equipment-clickable" data-equipment="<id>"> … </g>
+```
+
+(У групп `pump-circle` атрибуты добавлены инлайн — не отдельный wrapper.)
+
+**Идентификаторы:** `filter`, `pump-pre`, `pump-st1`, `pump-st2`,
+`membrane-1`, `membrane-2`.
+
+**Содержимое модалов:**
+
+| Тип (`kind`) | Секции |
+|---|---|
+| `filter` | ΔP (= P1 − P2) с состоянием-бейджем + табличка порогов (warn 0.5 bar / alarm 0.8 bar). Наработка картриджа: часы из `runtime_max_h`, прогресс-бар, до замены, дата установки. |
+| `pump` | Состояние (RUNNING/STARTING/ERROR/STOPPED) большим текстом + бейдж. Время работы: текущий цикл / запуск цикла / общая наработка / число пусков. Характеристики: модель, Q ном, P ном. |
+| `membrane` | Селективность по NaCl (%). Наработка от последней промывки + порог + дата + остаток + прогресс-бар. Общая наработка vs ресурс + остаток + прогресс-бар. Тип. |
+
+**`equipmentMeta` (data shape):**
+
+```js
+const equipmentMeta = {
+    'filter': {
+        kind: 'filter',
+        name_ru, name_en, subtitle_ru, subtitle_en,
+        delta_p, delta_p_warn, delta_p_alarm,        // bar
+        runtime_h, runtime_max_h,                     // часы
+        last_replaced,                                // ISO date
+    },
+    'pump-*': {
+        kind: 'pump',
+        name_ru, name_en, subtitle_ru, subtitle_en,
+        model, rated_q, rated_p,
+        state,                                        // 'running'|'starting'|'error'|'off'
+        run_continuous_h, run_total_h, starts, last_start,
+    },
+    'membrane-*': {
+        kind: 'membrane',
+        name_ru, name_en, subtitle_ru, subtitle_en, type_ru, type_en,
+        rejection,                                    // % NaCl
+        last_wash, run_since_wash_h, run_since_wash_warn_h,
+        run_total_h, run_max_h,
+    },
+};
+```
+
+В прототипе значения — псевдо-данные. На целевом устройстве `equipmentMeta`
+заполняется из контроллера через MQTT. **TODO API:** добавить топики
+`ro_plant/status/<equipment_id>/runtime` и `/state` в `asyncapi.yaml`.
+
+**JS-диспетчер:** `showEquipmentDetail(id)` ищет meta, выбирает рендерер
+(`renderFilterModal | renderPumpModal | renderMembraneModal`), переписывает
+`#sensor-modal` innerHTML, открывает модал. Делегирование клика —
+`document.querySelectorAll('.mnemo-svg [data-equipment]')`. **Защита от
+конфликта** с приборными кликами:
+
+```js
+el.addEventListener('click', e => {
+    if (e.target.closest('.sensor-group')) return;  // sensor-circle перехватил сам
+    showEquipmentDetail(el.getAttribute('data-equipment'));
+});
+```
+
+**CSS-стиль кликабельности** (`UI_TOKENS.md` §8.4):
+- `cursor: pointer`
+- hover → `filter: brightness(1.08) drop-shadow(0 0 4px var(--accent))`
+- focus-visible → `stroke: var(--accent-hover); stroke-width: 3`
+
+**Хелперы:**
+- `formatHours(h)` → `"1284 ч (53 дн)"` для h≥24, `"X.X ч"` иначе
+- `renderProgressBar(pct, state)` → inline-bar с цветом по
+  state (`ok`=accent, `warn`=warning, `danger`=danger)
+- `classifyByThresholds(value, warn, alarm)` → `'ok' | 'warn' | 'danger'`
+
 ---
 
 ## 11. Связанные документы
@@ -587,3 +829,39 @@ typedef struct {
   и §10 «Интерактивность мнемосхемы» в это ТЗ для фиксации финальных
   решений по реализации Главного экрана. UI_TOKENS.md и UI_SCREENS.md
   обновлены параллельно.
+
+- **2026-05-10 (визуальный апгрейд оборудования + кликабельность)**:
+  - **Насосы** переведены с `<rect class="equipment-active">` на P&ID
+    centrifugal pump symbol — `<g class="pump-circle [state]">` r=26
+    с импеллером из 4 wedge-blades. Состояния `.running` (radial-grad +
+    spin 1.5s), `.starting` (yellow + spin 3s + pulse 1.2s), `.error`
+    (red + pulse 1s, ротор статичен), `.off` (серый, статичен).
+    Уважает `prefers-reduced-motion`. Спецификация — §9.5.
+  - **Фильтр** переведён с `<rect>` 80×80 на `<polygon class="filter-diamond">`
+    40×40 ромб с буквой «Ф» (14 px) внутри. Сокращение размера освободило
+    интервал для P1+Q1 на трубе между Преднагн и фильтром. Спецификация — §9.7.
+  - **Ёмкости** расширены: водо-градиент `tankWaterGrad` (light cyan →
+    deep blue), белая ripple-волна `tank-wave-line` (5 s ease-in-out),
+    стержень-зонд `tank-probe` (пунктирный) и дискретные поплавковые
+    датчики `level-sw` (default/active/alarm) на стержне. Спецификация — §9.6.
+  - **Recycle 2** теперь стартует с **bottom-center мембраны 2** (280, 380)
+    напрямую как `pipe-recycle flowing` — без pipe-active stub и без
+    junction-маркера на источнике (симметрично с recycle 1). Q4 sensor
+    переехал в (415, 505).
+  - **Inject point дозатора** перенесён с (250, 210) на трубе
+    Преднагн→фильтр в (435, 210) на трубе фильтр→1ст — антискалант
+    впрыскивается **после** фильтра, иначе мехочистка задерживает хлопья.
+  - **viewBox мнемосхемы** обрезан с `0 0 900 560` до `0 30 900 530` —
+    освобождает горизонталь для Q2 (Y=55). preserveAspectRatio не изменён.
+  - **Sensor positions** скорректированы: Q1 X=290, Q2 Y=55, Q4 (415, 505).
+  - **Equipment click handlers**: фильтр, все насосы и обе мембраны
+    кликабельны и открывают свои детальные модалы (ΔP+картридж / state+
+    моточасы / rejection+wash-runtime+resource). См. §10.4.
+  - **Кнопки на главной**: «Ручной режим» убрал `btn-lg` (теперь как
+    «Стоп» — 60 px). «Промывка» теперь без confirm — `data-href="washing.html"`
+    + общий обработчик `[data-href]`.
+  - **Washing screen** редизайнен на компакт: phase-track в один ряд (4
+    плитки по 36 px), info-strip с таймерами+температурами в одной плашке
+    56 px, `.wash-mnemo` placeholder занимает остаток высоты под CIP-loop
+    SVG. Layout-фикс с `minmax(0,1fr)` + `min-height: 0` + `overflow-y: auto`
+    применён ко всем grid-экранам (washing/settings/debug).

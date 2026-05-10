@@ -8,9 +8,15 @@
         .settings-grid {
             display: grid;
             grid-template-columns: 220px 1fr;
+            grid-template-rows: minmax(0, 1fr);
             gap: var(--gap-md);
             padding: var(--gap-md);
             height: 100%;
+            min-height: 0;
+        }
+        .settings-grid > * {
+            min-height: 0;
+            overflow-y: auto;
         }
 
         .nav-list {
