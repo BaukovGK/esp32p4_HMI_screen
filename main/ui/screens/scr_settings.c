@@ -26,10 +26,14 @@
 #include "lang.h"
 #include "mqtt_app.h"      // mqtt_publish_settings_*
 #include "plant_data.h"    // settings_*_t
+#include "esp_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <math.h>
+
+static const char *TAG = "settings";
 
 /* ---- Хранилище виджетов ---- */
 
@@ -121,71 +125,125 @@ static lv_obj_t *make_field(lv_obj_t *parent, const char *label_text,
     return ta;
 }
 
-/** Читает float из текстового поля (возвращает 0 при пустом поле). */
+/** Читает float из текстового поля (возвращает NAN при пустом/невалидном вводе). */
 static float read_ta_float(lv_obj_t *ta)
 {
     const char *txt = lv_textarea_get_text(ta);
-    if (!txt || txt[0] == '\0') return 0.0f;
-    return strtof(txt, NULL);
+    if (!txt || txt[0] == '\0') return NAN;
+    char *end = NULL;
+    float val = strtof(txt, &end);
+    if (end == txt || !isfinite(val)) return NAN;
+    return val;
 }
 
-/** Читает int из текстового поля (возвращает 0 при пустом поле). */
+/** Читает int из текстового поля (возвращает -1 при пустом/невалидном вводе). */
 static int read_ta_int(lv_obj_t *ta)
 {
     const char *txt = lv_textarea_get_text(ta);
-    if (!txt || txt[0] == '\0') return 0;
-    return (int)strtol(txt, NULL, 10);
+    if (!txt || txt[0] == '\0') return -1;
+    char *end = NULL;
+    long val = strtol(txt, &end, 10);
+    if (end == txt || val < 0 || val > INT_MAX) return -1;
+    return (int)val;
 }
 
-/** Обработчик "Применить" вкладки "Давление" -- отправляет уставки по MQTT. */
+/** Проверяет float на попадание в диапазон [min, max]. Возвращает false если NaN или вне диапазона. */
+static bool validate_float(float val, float min, float max, float *out)
+{
+    if (isnan(val) || val < min || val > max) return false;
+    *out = val;
+    return true;
+}
+
+/** Проверяет int на попадание в диапазон [min, max]. Возвращает false если отрицательный или вне диапазона. */
+static bool validate_int(int val, int min, int max, int *out)
+{
+    if (val < min || val > max) return false;
+    *out = val;
+    return true;
+}
+
+/** Обработчик "Применить" вкладки "Давление" -- валидация и отправка уставок по MQTT. */
 static void evt_apply_pressure(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    settings_pressure_t s = {
-        .p1_max         = read_ta_float(w->ta_p1_max),
-        .p3_max         = read_ta_float(w->ta_p3_max),
-        .p4_max         = read_ta_float(w->ta_p4_max),
-        .filter_dp_warn = read_ta_float(w->ta_filter_dp_warn),
-    };
+    if (!w) return;
+
+    settings_pressure_t s;
+    bool ok = true;
+    ok &= validate_float(read_ta_float(w->ta_p1_max),         0.0f, 6.0f,  &s.p1_max);
+    ok &= validate_float(read_ta_float(w->ta_p3_max),         0.0f, 40.0f, &s.p3_max);
+    ok &= validate_float(read_ta_float(w->ta_p4_max),         0.0f, 10.0f, &s.p4_max);
+    ok &= validate_float(read_ta_float(w->ta_filter_dp_warn), 0.5f, 3.0f,  &s.filter_dp_warn);
+
+    if (!ok) {
+        ESP_LOGW(TAG, "Invalid pressure values");
+        return;
+    }
     mqtt_publish_settings_pressure(&s);
+    plant_data_save_settings_pressure(&s);
 }
 
-/** Обработчик "Применить" вкладки "Дозатор" -- отправляет уставки по MQTT. */
+/** Обработчик "Применить" вкладки "Дозатор" -- валидация и отправка уставок по MQTT. */
 static void evt_apply_doser(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    settings_doser_t s = {
-        .run_time_min   = read_ta_int(w->ta_run_time),
-        .cycle_time_min = read_ta_int(w->ta_cycle_time),
-    };
+    if (!w) return;
+
+    settings_doser_t s;
+    bool ok = true;
+    ok &= validate_int(read_ta_int(w->ta_run_time),   1,    60,   &s.run_time_min);
+    ok &= validate_int(read_ta_int(w->ta_cycle_time),  10,   1440, &s.cycle_time_min);
+
+    if (!ok) {
+        ESP_LOGW(TAG, "Invalid doser values");
+        return;
+    }
     mqtt_publish_settings_doser(&s);
+    plant_data_save_settings_doser(&s);
 }
 
-/** Обработчик "Применить" вкладки "Промывка" -- отправляет уставки по MQTT. */
+/** Обработчик "Применить" вкладки "Промывка" -- валидация и отправка уставок по MQTT. */
 static void evt_apply_washing(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    settings_washing_t s = {
-        .target_temp_C   = read_ta_float(w->ta_target_temp),
-        .max_temp_C      = read_ta_float(w->ta_max_temp),
-        .t_overshoot_C   = read_ta_float(w->ta_overshoot),
-        .hysteresis_C    = read_ta_float(w->ta_hysteresis),
-        .heat_timeout_min = read_ta_int(w->ta_heat_timeout),
-        .supply_time_min = read_ta_int(w->ta_supply_time),
-        .drain_time_min  = read_ta_int(w->ta_drain_time),
-    };
+    if (!w) return;
+
+    settings_washing_t s;
+    bool ok = true;
+    ok &= validate_float(read_ta_float(w->ta_target_temp), 20.0f, 40.0f, &s.target_temp_C);
+    ok &= validate_float(read_ta_float(w->ta_max_temp),    25.0f, 50.0f, &s.max_temp_C);
+    ok &= validate_float(read_ta_float(w->ta_overshoot),   30.0f, 60.0f, &s.t_overshoot_C);
+    ok &= validate_float(read_ta_float(w->ta_hysteresis),  0.5f,  10.0f, &s.hysteresis_C);
+    ok &= validate_int(read_ta_int(w->ta_heat_timeout),    5,     120,   &s.heat_timeout_min);
+    ok &= validate_int(read_ta_int(w->ta_supply_time),     5,     120,   &s.supply_time_min);
+    ok &= validate_int(read_ta_int(w->ta_drain_time),      1,     60,    &s.drain_time_min);
+
+    if (!ok) {
+        ESP_LOGW(TAG, "Invalid washing values");
+        return;
+    }
     mqtt_publish_settings_washing(&s);
+    plant_data_save_settings_washing(&s);
 }
 
-/** Обработчик "Применить" вкладки "Таймауты" -- отправляет уставки по MQTT. */
+/** Обработчик "Применить" вкладки "Таймауты" -- валидация и отправка уставок по MQTT. */
 static void evt_apply_timeouts(lv_event_t *e)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_event_get_user_data(e);
-    settings_timeouts_t s = {
-        .pump_confirm_ms = read_ta_int(w->ta_pump_confirm),
-        .pump_ramp_ms    = read_ta_int(w->ta_pump_ramp),
-    };
+    if (!w) return;
+
+    settings_timeouts_t s;
+    bool ok = true;
+    ok &= validate_int(read_ta_int(w->ta_pump_confirm), 1000,  10000, &s.pump_confirm_ms);
+    ok &= validate_int(read_ta_int(w->ta_pump_ramp),    5000,  30000, &s.pump_ramp_ms);
+
+    if (!ok) {
+        ESP_LOGW(TAG, "Invalid timeout values");
+        return;
+    }
     mqtt_publish_settings_timeouts(&s);
+    plant_data_save_settings_timeouts(&s);
 }
 
 /** Создаёт кнопку "Применить" внизу вкладки настроек. */
@@ -210,11 +268,19 @@ static lv_obj_t *make_apply_btn(lv_obj_t *tab, lv_event_cb_t cb, void *user_data
 
 /* ---- Обратные вызовы цифровой клавиатуры ---- */
 
-/** Добавляет цифру/точку в активное текстовое поле. */
+/** Добавляет цифру/точку в активное текстовое поле. Предотвращает повторную точку и ограничивает длину. */
 static void numpad_digit_cb(lv_event_t *e)
 {
     if (!s_widgets || !s_widgets->active_ta) return;
     const char *ch = (const char *)lv_event_get_user_data(e);
+    const char *txt = lv_textarea_get_text(s_widgets->active_ta);
+
+    /* Prevent multiple decimal points */
+    if (ch[0] == '.' && txt && strchr(txt, '.')) return;
+
+    /* Limit input length to 10 characters */
+    if (txt && strlen(txt) >= 10) return;
+
     lv_textarea_add_text(s_widgets->active_ta, ch);
 }
 
@@ -348,23 +414,37 @@ static lv_obj_t *create_numpad(lv_obj_t *parent, int32_t x, int32_t y)
 
 /* ---- Создание экрана ---- */
 
+/** Освобождение памяти виджетов при удалении контейнера экрана. */
+static void on_screen_delete(lv_event_t *e)
+{
+    lv_obj_t *obj = lv_event_get_target(e);
+    void *ud = lv_obj_get_user_data(obj);
+    if (ud) {
+        lv_free(ud);
+        lv_obj_set_user_data(obj, NULL);
+    }
+    s_widgets = NULL;  // Clear global pointer
+}
+
 /** Создаёт экран настроек: TabView (4 вкладки) + numpad справа. */
 lv_obj_t *scr_settings_create(lv_obj_t *parent)
 {
     lv_obj_t *cont = lv_obj_create(parent);
     lv_obj_remove_style_all(cont);
-    lv_obj_set_size(cont, 1280, 700);
+    lv_obj_set_size(cont, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
     lv_obj_set_style_bg_color(cont, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(cont, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
     settings_widgets_t *w = lv_malloc(sizeof(settings_widgets_t));
+    if (!w) return cont;
     lv_memzero(w, sizeof(settings_widgets_t));
+    lv_obj_add_event_cb(cont, on_screen_delete, LV_EVENT_DELETE, NULL);
     s_widgets = w;
 
     /* ---- Tabview (left 800px) ---- */
     lv_obj_t *tv = lv_tabview_create(cont);
-    lv_obj_set_size(tv, 800, 700);
+    lv_obj_set_size(tv, 800, UI_CONTENT_HEIGHT);
     lv_obj_set_pos(tv, 0, 0);
     lv_obj_set_style_bg_color(tv, COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(tv, LV_OPA_COVER, 0);
@@ -383,10 +463,10 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(t1, 16, 0);
     lv_obj_set_style_pad_row(t1, 4, 0);
 
-    w->ta_p1_max         = make_field(t1, "P1 max (bar)",       "");
-    w->ta_p3_max         = make_field(t1, "P3 max (bar)",       "");
-    w->ta_p4_max         = make_field(t1, "P4 max (bar)",       "");
-    w->ta_filter_dp_warn = make_field(t1, "Filter dP warn (bar)", "");
+    w->ta_p1_max         = make_field(t1, lang_str(STR_SET_P1_MAX),       "");
+    w->ta_p3_max         = make_field(t1, lang_str(STR_SET_P3_MAX),       "");
+    w->ta_p4_max         = make_field(t1, lang_str(STR_SET_P4_MAX),       "");
+    w->ta_filter_dp_warn = make_field(t1, lang_str(STR_SET_FILTER_DP_WARN), "");
     make_apply_btn(t1, evt_apply_pressure, w);
 
     /* ---- Tab 2: Doser ---- */
@@ -396,8 +476,8 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(t2, 16, 0);
     lv_obj_set_style_pad_row(t2, 4, 0);
 
-    w->ta_run_time   = make_field(t2, "Run time (min)",   "");
-    w->ta_cycle_time = make_field(t2, "Cycle time (min)", "");
+    w->ta_run_time   = make_field(t2, lang_str(STR_SET_RUN_TIME),   "");
+    w->ta_cycle_time = make_field(t2, lang_str(STR_SET_CYCLE_TIME), "");
     make_apply_btn(t2, evt_apply_doser, w);
 
     /* ---- Tab 3: Washing ---- */
@@ -407,13 +487,13 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(t3, 16, 0);
     lv_obj_set_style_pad_row(t3, 4, 0);
 
-    w->ta_target_temp  = make_field(t3, "Target temp (\xc2\xb0\x43)",    "");
-    w->ta_max_temp     = make_field(t3, "Max temp (\xc2\xb0\x43)",       "");
-    w->ta_overshoot    = make_field(t3, "Overshoot (\xc2\xb0\x43)",      "");
-    w->ta_hysteresis   = make_field(t3, "Hysteresis (\xc2\xb0\x43)",     "");
-    w->ta_heat_timeout = make_field(t3, "Heat timeout (min)",  "");
-    w->ta_supply_time  = make_field(t3, "Supply time (min)",   "");
-    w->ta_drain_time   = make_field(t3, "Drain time (min)",    "");
+    w->ta_target_temp  = make_field(t3, lang_str(STR_SET_TARGET_TEMP),    "");
+    w->ta_max_temp     = make_field(t3, lang_str(STR_SET_MAX_TEMP),       "");
+    w->ta_overshoot    = make_field(t3, lang_str(STR_SET_OVERSHOOT),      "");
+    w->ta_hysteresis   = make_field(t3, lang_str(STR_SET_HYSTERESIS),     "");
+    w->ta_heat_timeout = make_field(t3, lang_str(STR_SET_HEAT_TIMEOUT),  "");
+    w->ta_supply_time  = make_field(t3, lang_str(STR_SET_SUPPLY_TIME),   "");
+    w->ta_drain_time   = make_field(t3, lang_str(STR_SET_DRAIN_TIME),    "");
     make_apply_btn(t3, evt_apply_washing, w);
 
     /* ---- Tab 4: Timeouts ---- */
@@ -423,8 +503,8 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(t4, 16, 0);
     lv_obj_set_style_pad_row(t4, 4, 0);
 
-    w->ta_pump_confirm = make_field(t4, "Pump confirm (ms)", "");
-    w->ta_pump_ramp    = make_field(t4, "Pump ramp (ms)",    "");
+    w->ta_pump_confirm = make_field(t4, lang_str(STR_SET_PUMP_CONFIRM), "");
+    w->ta_pump_ramp    = make_field(t4, lang_str(STR_SET_PUMP_RAMP),    "");
     make_apply_btn(t4, evt_apply_timeouts, w);
 
     /* ---- Numeric Keypad (right side) ---- */
@@ -444,10 +524,11 @@ lv_obj_t *scr_settings_create(lv_obj_t *parent)
  * Значения берутся из кэша plant_data_t (set_pressure, set_doser, set_washing, set_timeouts).
  * Если поле уже заполнено (оператор ввёл значение), оно НЕ перезаписывается.
  */
-void scr_settings_update(lv_obj_t *container, const plant_data_t *d)
+void scr_settings_update(lv_obj_t *container, const plant_data_t *d, uint32_t dirty)
 {
     settings_widgets_t *w = (settings_widgets_t *)lv_obj_get_user_data(container);
     if (!w) return;
+    (void)dirty;  /* Settings loads values once from initial data, no incremental update needed */
 
     /*
      * Only load values into text areas if they are currently empty.

@@ -47,6 +47,8 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
             break;
         case ETHERNET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "Ethernet link down");
+            /* MQTT status update moved to mqtt_app.c (MQTT_EVENT_DISCONNECTED handler)
+               to maintain HAL independence from services layer */
             break;
         case ETHERNET_EVENT_START:
             ESP_LOGI(TAG, "Ethernet started");
@@ -63,6 +65,15 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
         // Сигнализируем ожидающим задачам о получении IP
         if (s_eth_event_group) {
             xEventGroupSetBits(s_eth_event_group, ETH_GOT_IP_BIT);
+        }
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_LOST_IP) {
+        ESP_LOGW(TAG, "Lost IP address");
+        /* MQTT status update moved to mqtt_app.c (MQTT_EVENT_DISCONNECTED handler)
+           to maintain HAL independence from services layer */
+        // Сбросить бит ETH_GOT_IP_BIT при потере IP, чтобы eth_wait_for_ip()
+        // не вернул OK сразу при повторном коннекте с link down
+        if (s_eth_event_group) {
+            xEventGroupClearBits(s_eth_event_group, ETH_GOT_IP_BIT);
         }
     }
 }
@@ -82,51 +93,170 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
  *
  * @return ESP_OK при успешной инициализации, код ошибки при неудаче
  */
+/** Static storage for Ethernet driver handles (freed by eth_deinit) */
+static esp_eth_handle_t s_eth_handle = NULL;
+static esp_eth_mac_t *s_mac = NULL;
+static esp_eth_phy_t *s_phy = NULL;
+static esp_netif_t *s_eth_netif = NULL;
+
 esp_err_t eth_init(void)
 {
+    esp_err_t err = ESP_OK;
+
     s_eth_event_group = xEventGroupCreate();
+    configASSERT(s_eth_event_group);
 
     // Инициализация TCP/IP стека
-    ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif init failed");
+    err = esp_netif_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "netif init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
     // Создание цикла обработки событий по умолчанию
-    ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop failed");
+    // ESP_ERR_INVALID_STATE означает, что кто-то другой (BT, NVS, Wi-Fi) уже создал loop
+    esp_err_t loop_err = esp_event_loop_create_default();
+    if (loop_err != ESP_OK && loop_err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(loop_err));
+        err = loop_err;
+        goto cleanup;
+    }
+    if (loop_err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGI(TAG, "default event loop already exists, reusing");
+    }
 
     /* Создание сетевого интерфейса Ethernet по умолчанию */
     esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
-    esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
+    s_eth_netif = esp_netif_new(&netif_cfg);
+    if (!s_eth_netif) {
+        ESP_LOGE(TAG, "Failed to create netif");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
 
     /* Конфигурация внутреннего EMAC контроллера ESP32-P4 */
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_cfg = ETH_ESP32_EMAC_DEFAULT_CONFIG();
     emac_cfg.smi_gpio.mdc_num = CONFIG_ETH_MDC_GPIO;   // GPIO тактирования SMI (MDC)
     emac_cfg.smi_gpio.mdio_num = CONFIG_ETH_MDIO_GPIO; // GPIO данных SMI (MDIO)
-    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
+    s_mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
+    if (!s_mac) {
+        ESP_LOGE(TAG, "Failed to create MAC");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
 
     /* Конфигурация PHY-чипа IP101 */
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
-    phy_cfg.phy_addr = CONFIG_ETH_PHY_ADDR;            // Адрес PHY на шине SMI
+    phy_cfg.phy_addr = -1;                             // Autodetect адреса PHY (0 или 1 в зависимости от страпов на плате)
     phy_cfg.reset_gpio_num = CONFIG_ETH_PHY_RST_GPIO;  // GPIO аппаратного сброса PHY
-    esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_cfg);
+    s_phy = esp_eth_phy_new_ip101(&phy_cfg);
+    if (!s_phy) {
+        ESP_LOGE(TAG, "Failed to create PHY");
+        err = ESP_FAIL;
+        goto cleanup;
+    }
 
     /* Установка Ethernet-драйвера */
-    esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
-    esp_eth_handle_t eth_handle = NULL;
-    ESP_RETURN_ON_ERROR(esp_eth_driver_install(&eth_cfg, &eth_handle), TAG, "driver install failed");
+    esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(s_mac, s_phy);
+    err = esp_eth_driver_install(&eth_cfg, &s_eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "driver install failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
     /* Привязка Ethernet-драйвера к сетевому интерфейсу */
-    ESP_RETURN_ON_ERROR(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)),
-                        TAG, "netif attach failed");
+    err = esp_netif_attach(s_eth_netif, esp_eth_new_netif_glue(s_eth_handle));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "netif attach failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
     /* Регистрация обработчиков событий Ethernet и IP */
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
-                        eth_event_handler, NULL), TAG, "ETH event handler failed");
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
-                        eth_event_handler, NULL), TAG, "IP event handler failed");
+    err = esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
+                                     eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ETH event handler registration failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
+                                     eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "IP event handler registration failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_LOST_IP,
+                                     eth_event_handler, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "IP lost event handler registration failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
     /* Запуск Ethernet-драйвера */
-    ESP_RETURN_ON_ERROR(esp_eth_start(eth_handle), TAG, "eth start failed");
+    err = esp_eth_start(s_eth_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "eth start failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    /* Логирование MAC-адреса для отладки (DHCP-резервации, настройка коммутаторов) */
+    uint8_t mac[6];
+    if (esp_eth_ioctl(s_eth_handle, ETH_CMD_G_MAC_ADDR, mac) == ESP_OK) {
+        ESP_LOGI(TAG, "Ethernet MAC: %02x:%02x:%02x:%02x:%02x:%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
 
     ESP_LOGI(TAG, "Ethernet initialized, waiting for link...");
+    return ESP_OK;
+
+cleanup:
+    if (s_eth_handle) {
+        esp_eth_driver_uninstall(s_eth_handle);
+        s_eth_handle = NULL;
+    }
+    if (s_mac) {
+        s_mac->del(s_mac);
+        s_mac = NULL;
+    }
+    if (s_phy) {
+        s_phy->del(s_phy);
+        s_phy = NULL;
+    }
+    if (s_eth_netif) {
+        esp_netif_destroy(s_eth_netif);
+        s_eth_netif = NULL;
+    }
+    return err;
+}
+
+/**
+ * Деинициализация Ethernet и освобождение ресурсов.
+ *
+ * Останавливает Ethernet-драйвер и освобождает выделенные ресурсы.
+ * Безопасна при вызове несколько раз (проверяет null-pointers).
+ *
+ * @return ESP_OK при успехе, код ошибки при неудаче
+ */
+esp_err_t eth_deinit(void)
+{
+    if (s_eth_handle) {
+        esp_eth_driver_uninstall(s_eth_handle);
+        s_eth_handle = NULL;
+    }
+    if (s_mac) {
+        s_mac->del(s_mac);
+        s_mac = NULL;
+    }
+    if (s_phy) {
+        s_phy->del(s_phy);
+        s_phy = NULL;
+    }
+    if (s_eth_netif) {
+        esp_netif_destroy(s_eth_netif);
+        s_eth_netif = NULL;
+    }
     return ESP_OK;
 }
 
@@ -143,8 +273,14 @@ esp_err_t eth_init(void)
  */
 esp_err_t eth_wait_for_ip(TickType_t timeout_ticks)
 {
+    if (!s_eth_event_group) {
+        ESP_LOGE(TAG, "Event group not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* Single bit: xWaitForAllBits vs xWaitForAnyBits semantically identical;
+       pdFALSE (any) is more idiomatic for single-bit waits */
     EventBits_t bits = xEventGroupWaitBits(s_eth_event_group, ETH_GOT_IP_BIT,
-                                           pdFALSE, pdTRUE, timeout_ticks);
+                                           pdFALSE, pdFALSE, timeout_ticks);
     if (bits & ETH_GOT_IP_BIT) {
         return ESP_OK;
     }

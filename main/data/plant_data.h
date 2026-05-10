@@ -19,6 +19,11 @@
 #include <stdbool.h>
 #include <math.h>
 
+/* ---- Константы ---- */
+
+/** Максимальное количество Modbus-устройств на шине (Waveshare AI + УРЖ + 2× СЛ21 + 2× KWS-306L) */
+#define DIAG_MAX_MB_DEVICES 6
+
 /* ---- Перечисления состояний установки ---- */
 
 /** Основное состояние установки */
@@ -85,12 +90,22 @@ typedef struct {
     bool  ok;       // Канал исправен
 } flow_channel_t;
 
-/** Канал кондуктометра (s1-s3) */
+/** Канал кондуктометра (s1-s4: FEED, PERM1, PERM2, CONC) */
 typedef struct {
     float conductivity; // Электропроводность, мкСм/см (NAN при неисправности)
     float temperature;  // Температура компенсации, градусы C
     bool  ok;           // Канал исправен
 } cond_channel_t;
+
+/** Снимок данных с цифрового счётчика электроэнергии KWS-306L (LP / HP насос). */
+typedef struct {
+    float voltage;       // Напряжение, В (NAN если offline)
+    float current;       // Ток, А (NAN если offline)
+    float power;         // Активная мощность, Вт (NAN если offline)
+    float energy;        // Накопленная энергия, кВт·ч (NAN если offline)
+    float temperature;   // Температура счётчика, °C (NAN если offline)
+    bool  online;        // Modbus-устройство отвечает
+} power_meter_data_t;
 
 /** Расчётная телеметрия (вычисляется контроллером на основе датчиков) */
 typedef struct {
@@ -117,17 +132,17 @@ typedef struct {
 
 /** Диагностика контроллера ESP32-S3 */
 typedef struct {
-    uint32_t heap_free;         // Свободная куча, байт
-    uint32_t heap_min;          // Минимум кучи за всё время работы, байт
-    int64_t  uptime_s;          // Время работы контроллера, секунды
-    uint32_t stack_modbus;      // Остаток стека задачи Modbus, байт
-    uint32_t stack_io;          // Остаток стека задачи IO, байт
-    uint32_t stack_process;     // Остаток стека задачи Process, байт
-    uint32_t stack_watchdog;    // Остаток стека задачи Watchdog, байт
-    uint32_t stack_mqtt;        // Остаток стека задачи MQTT, байт
-    uint32_t modbus_errors[4];  // Счётчики ошибок по каждому Modbus-устройству
-    bool     modbus_online[4];  // Статус связи с каждым Modbus-устройством
-    uint32_t wdt_stale;         // Битовая маска: какие задачи не отвечают WDT
+    uint32_t heap_free;              // Свободная куча, байт
+    uint32_t heap_min;               // Минимум кучи за всё время работы, байт
+    int64_t  uptime_s;               // Время работы контроллера, секунды
+    uint32_t stack_modbus;           // Остаток стека задачи Modbus, байт
+    uint32_t stack_io;               // Остаток стека задачи IO, байт
+    uint32_t stack_process;          // Остаток стека задачи Process, байт
+    uint32_t stack_watchdog;         // Остаток стека задачи Watchdog, байт
+    uint32_t stack_mqtt;             // Остаток стека задачи MQTT, байт
+    uint32_t modbus_errors[DIAG_MAX_MB_DEVICES];  // Счётчики ошибок по каждому Modbus-устройству
+    bool     modbus_online[DIAG_MAX_MB_DEVICES];  // Статус связи с каждым Modbus-устройством
+    uint32_t wdt_stale;              // Битовая маска: какие задачи не отвечают WDT
 } diagnostics_t;
 
 /** Запись журнала аварий */
@@ -199,7 +214,10 @@ typedef struct {
     flow_channel_t flow[4];         // Расходомеры Q1..Q4
 
     /* --- Кондуктометры --- */
-    cond_channel_t conductivity[3]; // Кондуктометры s1..s3
+    cond_channel_t conductivity[4]; // Кондуктометры s1..s4 (FEED, PERM1, PERM2, CONC)
+
+    /* --- Счётчики электроэнергии KWS-306L (3-фазные) --- */
+    power_meter_data_t pumps[2];    // [0] = LP-насос (НД), [1] = HP-насос (ВД)
 
     /* --- Расчётная телеметрия --- */
     telemetry_t telemetry;
@@ -211,6 +229,7 @@ typedef struct {
 
     /* --- Статус HMI-панели --- */
     bool    mqtt_connected;         // Соединение MQTT установлено
+    bool    controller_online;      // Контроллер онлайн (по топику ro_plant/availability)
     int64_t last_msg_time_us;       // Время последнего сообщения, мкс (esp_timer)
 
     /* --- Кэш уставок (копия с контроллера) --- */
@@ -239,12 +258,48 @@ typedef struct {
 #define DIRTY_DOSER         (1u << 7)   // Изменилось состояние дозатора
 #define DIRTY_DIAGNOSTICS   (1u << 8)   // Изменилась диагностика
 #define DIRTY_ALARMS        (1u << 9)   // Изменился журнал аварий
-#define DIRTY_ALL           (0x3FFu)    // Все флаги (биты 0..9)
+#define DIRTY_POWER         (1u << 10)  // Изменились данные KWS-306L (LP / HP)
+#define DIRTY_CONTROLLER    (1u << 11)  // Изменился флаг controller_online
+#define DIRTY_SETTINGS      (1u << 12)  // Изменились локально-кэшированные уставки
+#define DIRTY_ALL           (0x1FFFu)   // Все флаги (биты 0..12)
+
+/* DI — Цифровые входы (битовые маски) */
+#define DI_SOURCE_LOW    (1u << 0)   /* DI1: нижний уровень исходной ёмкости  */
+#define DI_SOURCE_HIGH   (1u << 1)   /* DI2: верхний уровень исходной ёмкости */
+#define DI_INTERM_LOW    (1u << 2)   /* DI3: нижний уровень промежуточной     */
+#define DI_INTERM_HIGH   (1u << 3)   /* DI4: верхний уровень промежуточной    */
+#define DI_PUMP1_RUN     (1u << 4)   /* DI5: подтверждение работы насоса 1    */
+#define DI_PUMP2_RUN     (1u << 5)   /* DI6: подтверждение работы насоса 2    */
+#define DI_PUMP3_RUN     (1u << 6)   /* DI7: подтверждение работы насоса 3    */
+#define DI_PERMEATE_HIGH (1u << 7)   /* DI8: верхний уровень ёмкости пермеата */
+
+/* DO — Цифровые выходы (битовые маски) */
+#define DO_PUMP1         (1u << 0)   /* Подающий насос    */
+#define DO_PUMP2         (1u << 1)   /* Насос 1й ступени  */
+#define DO_PUMP3         (1u << 2)   /* Насос 2й ступени  */
+#define DO_HEATER        (1u << 3)   /* Нагреватель       */
+#define DO_DOSER         (1u << 4)   /* Дозатор           */
+#define DO_VALVE1        (1u << 5)   /* Клапан 1          */
+#define DO_VALVE2        (1u << 6)   /* Клапан 2          */
 
 /* ---- API (потокобезопасный доступ через внутренний мьютекс) ---- */
 
-/** Инициализация хранилища: обнуление, значения по умолчанию, создание мьютекса */
+/** Инициализация хранилища: обнуление, загрузка уставок из NVS, создание мьютекса */
 void plant_data_init(void);
+
+/* ---- Локальное кэширование уставок в NVS ---- */
+
+/** Сохранить уставки давления в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_pressure(const settings_pressure_t *s);
+
+/** Сохранить уставки дозатора в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_doser(const settings_doser_t *s);
+
+/** Сохранить уставки промывки в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_washing(const settings_washing_t *s);
+
+/** Сохранить уставки таймаутов в NVS и обновить кэш в plant_data */
+void plant_data_save_settings_timeouts(const settings_timeouts_t *s);
 
 /**
  * Захват мьютекса для пакетного чтения (UI-задача).
@@ -293,8 +348,15 @@ void plant_data_set_temperature(float value, bool fault);
 /** Установить данные расходомера (idx: 0=Q1, 1=Q2, 2=Q3, 3=Q4) */
 void plant_data_set_flow(int idx, float flow, float volume, bool ok);
 
-/** Установить данные кондуктометра (idx: 0=s1, 1=s2, 2=s3) */
+/** Установить данные кондуктометра (idx: 0=s1, 1=s2, 2=s3, 3=s4) */
 void plant_data_set_conductivity(int idx, float cond, float temp, bool ok);
+
+/**
+ * Установить данные счётчика электроэнергии KWS-306L.
+ * @param idx   0 = LP-насос (низкого давления), 1 = HP-насос (высокого давления)
+ * @param data  снимок параметров (копируется внутрь plant_data)
+ */
+void plant_data_set_power_meter(int idx, const power_meter_data_t *data);
 
 /** Установить расчётную телеметрию (копирование структуры) */
 void plant_data_set_telemetry(const telemetry_t *tel);
@@ -310,3 +372,32 @@ void plant_data_set_diagnostics(const diagnostics_t *diag);
 
 /** Установить статус MQTT-соединения (для отображения на HMI) */
 void plant_data_set_mqtt_status(bool connected);
+
+/**
+ * Установить флаг controller_online (по топику ro_plant/availability).
+ * Не обновляет last_msg_time_us — это статус контроллера, а не данные от него.
+ */
+void plant_data_set_controller_online(bool online);
+
+/**
+ * Получить флаг controller_online (потокобезопасно, под мьютексом с таймаутом).
+ * @return true если контроллер последний раз публиковал "online";
+ *         false если "offline" или мьютекс не удалось захватить.
+ */
+bool plant_data_get_controller_online(void);
+
+/* ---- Удобные геттеры (потокобезопасные, копируют под мьютексом) ---- */
+
+/**
+ * Получить копию снимка данных LP-насоса (счётчик KWS-306L).
+ * Захватывает мьютекс на время копирования.
+ * @return структура с данными; .online=false если timeout мьютекса
+ */
+power_meter_data_t plant_data_get_power_lp(void);
+
+/**
+ * Получить копию снимка данных HP-насоса (счётчик KWS-306L).
+ * Захватывает мьютекс на время копирования.
+ * @return структура с данными; .online=false если timeout мьютекса
+ */
+power_meter_data_t plant_data_get_power_hp(void);

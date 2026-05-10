@@ -142,5 +142,60 @@ typedef enum {
     STR_UNIT_MINUTES,  // минуты
     STR_UNIT_BYTES,    // байты (для диагностики памяти)
 
+    /* Column headers (scr_parameters) */
+    STR_HDR_PARAMETER,    // Параметр
+    STR_HDR_VALUE,        // Значение
+    STR_HDR_EXTRA,        // Доп. информация
+    STR_HDR_STATUS,       // Статус
+
+    /* Calculated parameters (scr_parameters) */
+    STR_CALC_FILTER_DP,   // Перепад фильтра
+    STR_CALC_STAGE1_FEED, // Подача 1-й ступени
+    STR_CALC_RECOVERY2,   // Извлечение 2-й ст.
+    STR_CALC_RECOVERY_SYS,// Извлечение системы
+    STR_CALC_SEL1,        // Селективность 1-й
+    STR_CALC_SEL2,        // Селективность 2-й
+    STR_CALC_SECTION,     // Расчётные
+
+    /* Diagnostics panel titles (scr_diagnostics) */
+    STR_DIAG_SYSTEM,      // Система
+    STR_DIAG_TASK_STACKS, // Стеки задач
+    STR_HDR_DEVICE,       // Устройство
+    STR_HDR_ERRORS,       // Ошибки
+    STR_HDR_TASK,         // Задача
+    STR_HDR_FREE_BYTES,   // Свободно (байт)
+
+    /* Mnemonic labels (scr_mnemonic) */
+    STR_LBL_DRAIN,        // Дренаж
+    STR_LBL_RECYCLE_Q2,   // Q2 рецикл
+    STR_LBL_RECYCLE_Q4,   // Q4 рецикл
+
+    /* Settings field labels (scr_settings) */
+    STR_SET_P1_MAX,        // P1 макс. (бар)
+    STR_SET_P3_MAX,        // P3 макс. (бар)
+    STR_SET_P4_MAX,        // P4 макс. (бар)
+    STR_SET_FILTER_DP_WARN,// Предупр. dP фильтра (бар)
+    STR_SET_RUN_TIME,      // Время работы (мин)
+    STR_SET_CYCLE_TIME,    // Время цикла (мин)
+    STR_SET_TARGET_TEMP,   // Целевая темп. (°C)
+    STR_SET_MAX_TEMP,      // Макс. темп. (°C)
+    STR_SET_OVERSHOOT,     // Перебег (°C)
+    STR_SET_HYSTERESIS,    // Гистерезис (°C)
+    STR_SET_HEAT_TIMEOUT,  // Таймаут нагрева (мин)
+    STR_SET_SUPPLY_TIME,   // Время подачи (мин)
+    STR_SET_DRAIN_TIME,    // Время слива (мин)
+    STR_SET_PUMP_CONFIRM,  // Подтв. насоса (мс)
+    STR_SET_PUMP_RAMP,     // Время разгона (мс)
+
+    /* Washing screen */
+    STR_WASH_TARGET_INFO,  // Целевая: ... | Макс.: ...
+
+    /* Alarm screen (scr_alarms) */
+    STR_ALARM_ACTIVE_TITLE,   // Активные аварии
+    STR_ALARM_HISTORY_TITLE,  // История аварий
+    STR_ALARM_NONE_ACTIVE,    // Нет активных аварий
+    STR_ALARM_NONE_HISTORY,   // Нет записей
+    STR_ALARM_ACTIVE_BADGE,   // АКТИВНА
+
     STR_COUNT  // Общее количество строк (служебное значение)
 } str_id_t;

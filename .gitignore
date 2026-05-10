@@ -1,0 +1,34 @@
+# ESP-IDF build artefacts and managed dependencies
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+proto
+
+# sdkconfig генерируется из sdkconfig.defaults через idf.py reconfigure
+# и должен игнорироваться — каждый разработчик генерирует его для своей платформы
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Windows
+Thumbs.db
+
+# Локальные конфиги/секреты
+*.local.*
+secrets.h
+secrets.yaml.local
+
+# Claude Code local cache
+.claude/
+
+# clangd / LSP
+.clangd
+.cache/

@@ -1,5 +1,10 @@
-# Target
+# Target — Waveshare ESP32-P4-NANO.
+# Оба ключа нужны: CONFIG_IDF_TARGET — строковая идентификация,
+# CONFIG_IDF_TARGET_ESP32P4=y активирует зависимые опции
+# (SOC_MIPI_DSI_SUPPORTED через soc_caps.h, без этого esp_lcd/dsi/*
+# не собирается и esp_lcd_mipi_dsi.h не находится).
 CONFIG_IDF_TARGET="esp32p4"
+CONFIG_IDF_TARGET_ESP32P4=y
 
 # Flash
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -27,6 +32,9 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# OTA rollback
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # FreeRTOS
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
@@ -44,11 +52,23 @@ CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 
-# Ethernet
+# Ethernet (Waveshare ESP32-P4-NANO: IP101 PHY, RST на GPIO51)
 CONFIG_ETH_USE_ESP32_EMAC=y
+CONFIG_ETH_PHY_RST_GPIO=51
+
+# Console (UART — через USB-UART мост на COM-порту прошивки)
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
 # Log level
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# I2C: разрешить одновременное использование legacy и нового драйвера
+# (компонент waveshare/esp_lcd_jd9365 использует legacy i2c_bus,
+#  а board_i2c и touch используют новый i2c_master API)
+CONFIG_I2C_SKIP_LEGACY_CONFLICT_CHECK=y
+
+# Отключить сборку LVGL демо-примеров (экономия flash)
+CONFIG_LV_BUILD_EXAMPLES=n
 
 # MQTT
 CONFIG_MQTT_BUFFER_SIZE=2048
