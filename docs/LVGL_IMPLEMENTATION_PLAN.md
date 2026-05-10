@@ -3,6 +3,25 @@
 Перенос HTML-прототипа (`proto/`) на LVGL 9.2 / esp_lvgl_port для
 ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 
+## Статус (на 2026-05-11)
+
+| Фаза | Описание | Статус |
+|---|---|---|
+| 0 | Design tokens (light/dark) | ✅ |
+| 1 | Statusbar + tabbar + ui_main migration | ✅ |
+| 2 | Mnemo widgets (tank/pump/filter/membrane/sensor/pipe) + composer | ✅ |
+| 3 | Модалы (sensor + equipment detail) | ✅ |
+| 4 | Промывка (compact phase-track + info-strip + mnemo placeholder) | ✅ |
+| 5 | Settings + Debug | ✅ (minimal — color macro remap) |
+| 6 | Runtime integration (MQTT/NVS) | partial — данные подключены, persistence TODO |
+| 7 | Анимации | ✅ 6/7 (prefers-reduced-motion TODO) |
+
+**Симулятор:** `./sim/build.sh` запускает нативное SDL2-окно 1280×800.
+Все экраны и виджеты видны. Bounded test: clicks по датчикам/equipment
+открывают модалы; pump rotors крутятся; pipe-flow марширует.
+
+**Готово к проверке на стенде:** `idf.py build && idf.py flash`.
+
 > Источники истины:
 > - **Дизайн-токены:** `docs/UI_TOKENS.md` ↔ `proto/style.css` ↔ `main/ui/ui_tokens.h/.c`
 > - **Экраны:** `docs/UI_SCREENS.md` ↔ `proto/*.html`
