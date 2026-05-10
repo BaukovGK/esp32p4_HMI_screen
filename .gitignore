@@ -3,6 +3,7 @@ build/
 managed_components/
 sdkconfig
 sdkconfig.old
+proto
 
 # sdkconfig генерируется из sdkconfig.defaults через idf.py reconfigure
 # и должен игнорироваться — каждый разработчик генерирует его для своей платформы

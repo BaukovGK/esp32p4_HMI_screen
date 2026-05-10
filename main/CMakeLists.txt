@@ -4,6 +4,7 @@ set(MAIN_SRCS
     "board/display_init.c"
     "board/touch_init.c"
     "data/plant_data.c"
+    "data/nvs_worker.c"
     "data/alarm_ring.c"
     "net/eth_init.c"
     "mqtt/mqtt_app.c"

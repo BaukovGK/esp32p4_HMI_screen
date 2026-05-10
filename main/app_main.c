@@ -34,6 +34,8 @@
 #include "eth_init.h"
 // Хранилище параметров установки обратного осмоса
 #include "plant_data.h"
+// Фоновый воркер асинхронной записи уставок в NVS (Top-11 fix)
+#include "nvs_worker.h"
 // Кольцевой буфер для хранения истории аварий
 #include "alarm_ring.h"
 // Модуль интернационализации (i18n)
@@ -98,6 +100,17 @@ void app_main(void)
     /* 5. Инициализация хранилища данных установки (давления, расходы, состояния клапанов и т.д.) */
     plant_data_init();
     ESP_LOGI(TAG, "Plant data store initialized");
+
+    /* 5a. Воркер асинхронной записи NVS (Top-11): UI больше не блокируется
+     *     на flash-write (10..100 мс). Некритично — при ошибке plant_data
+     *     сделает синхронный fallback. */
+    ret = nvs_worker_init();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "NVS worker started");
+    } else {
+        ESP_LOGW(TAG, "NVS worker init failed: %s — saves will run synchronously",
+                 esp_err_to_name(ret));
+    }
 
     /* 6. Инициализация кольцевого буфера аварий (хранение истории аварийных событий) */
     alarm_ring_init();

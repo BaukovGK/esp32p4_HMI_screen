@@ -8,6 +8,10 @@
  * - ro_plant/command/...   -- команды управления (HMI публикует)
  * - ro_plant/settings/...  -- настройки/уставки (HMI публикует)
  * - ro_hmi/availability    -- статус доступности HMI (online/offline)
+ *
+ * ВАЖНО: Все макросы топиков — null-terminated string literals. При добавлении
+ * нового топика убедитесь что его длина < MQTT_TOPIC_BUF_SIZE; либо добавьте
+ * _Static_assert ниже в конце файла.
  */
 #pragma once
 
@@ -89,3 +93,23 @@
 
 /** Статус доступности HMI-дисплея: "online" / "offline" (retained, LWT) */
 #define MQTT_TOPIC_HMI_AVAILABILITY "ro_hmi/availability"
+
+/* ---- Размер буфера для копирования топика в парсере ---- */
+
+/** Размер буфера для копирования топика в парсере.
+ *  Гарантировано вмещает все определённые топики этого header'а. */
+#define MQTT_TOPIC_BUF_SIZE 128
+
+/* Compile-time проверка что самый длинный топик помещается в буфер.
+ * Самые длинные:
+ *  ro_plant/status/conductivity/s4    = 32 байта
+ *  ro_plant/status/diagnostics        = 28 байт
+ *  ro_plant/status/power/lp           = 25 байт
+ * Запас MQTT_TOPIC_BUF_SIZE - max_topic_len ~= 96 байт хватает на любые
+ * будущие расширения топик-структуры. */
+_Static_assert(sizeof("ro_plant/status/conductivity/s4") <= MQTT_TOPIC_BUF_SIZE,
+               "MQTT_TOPIC_BUF_SIZE слишком мал для conductivity/s4");
+_Static_assert(sizeof("ro_plant/status/diagnostics") <= MQTT_TOPIC_BUF_SIZE,
+               "MQTT_TOPIC_BUF_SIZE слишком мал для diagnostics");
+_Static_assert(sizeof("ro_plant/status/power/lp") <= MQTT_TOPIC_BUF_SIZE,
+               "MQTT_TOPIC_BUF_SIZE слишком мал для power/lp");

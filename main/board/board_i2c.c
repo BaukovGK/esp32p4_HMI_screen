@@ -10,11 +10,15 @@
 #include "board_i2c.h"
 #include "board.h"
 #include "esp_log.h"
+#include "freertos/portmacro.h"
 #include <stdio.h>
 
 static const char *TAG = "board_i2c";
 
 static i2c_master_bus_handle_t s_i2c_bus = NULL;
+/** Защита s_i2c_bus от гонок init↔get; функции i2c_master_* сами потокобезопасны
+ *  и не требуют дополнительной обвязки, но публичный геттер требует барьера. */
+static portMUX_TYPE s_i2c_bus_mux = portMUX_INITIALIZER_UNLOCKED;
 
 /**
  * Сканирование шины I2C — поиск всех отвечающих устройств.
@@ -51,9 +55,12 @@ static void board_i2c_scan(void)
 
 esp_err_t board_i2c_init(void)
 {
+    portENTER_CRITICAL(&s_i2c_bus_mux);
     if (s_i2c_bus) {
+        portEXIT_CRITICAL(&s_i2c_bus_mux);
         return ESP_OK;
     }
+    portEXIT_CRITICAL(&s_i2c_bus_mux);
 
     i2c_master_bus_config_t bus_cfg = {
         .i2c_port = BOARD_TOUCH_I2C_PORT,
@@ -65,8 +72,12 @@ esp_err_t board_i2c_init(void)
             .enable_internal_pullup = true,
         },
     };
-    esp_err_t ret = i2c_new_master_bus(&bus_cfg, &s_i2c_bus);
+    i2c_master_bus_handle_t tmp_bus = NULL;
+    esp_err_t ret = i2c_new_master_bus(&bus_cfg, &tmp_bus);
     if (ret == ESP_OK) {
+        portENTER_CRITICAL(&s_i2c_bus_mux);
+        s_i2c_bus = tmp_bus;
+        portEXIT_CRITICAL(&s_i2c_bus_mux);
         ESP_LOGI(TAG, "I2C bus initialized (SDA=%d, SCL=%d)",
                  BOARD_TOUCH_I2C_SDA, BOARD_TOUCH_I2C_SCL);
         board_i2c_scan();
@@ -76,6 +87,9 @@ esp_err_t board_i2c_init(void)
 
 i2c_master_bus_handle_t board_i2c_get_bus(void)
 {
-    return s_i2c_bus;
+    portENTER_CRITICAL(&s_i2c_bus_mux);
+    i2c_master_bus_handle_t handle = s_i2c_bus;
+    portEXIT_CRITICAL(&s_i2c_bus_mux);
+    return handle;
 }
 #endif /* !LVGL_LIVE_PREVIEW */

@@ -33,12 +33,13 @@ typedef enum {
  * @brief Инициализация модуля i18n.
  *
  * Заполняет внутренний массив таблиц строк указателями на lang_en_strings
- * и lang_ru_strings, устанавливает язык по умолчанию.
- * Вызывается один раз при старте приложения (app_main).
+ * и lang_ru_strings. Загружает язык из NVS если доступен, иначе использует
+ * fallback_lang. Вызывается один раз при старте приложения (app_main).
  *
- * @param default_lang Язык, используемый по умолчанию после инициализации.
+ * @param fallback_lang Язык, используемый если в NVS нет сохранённого языка.
+ * @return Фактически выбранный язык (из NVS или fallback_lang).
  */
-void        lang_init(lang_id_t default_lang);
+lang_id_t   lang_init(lang_id_t fallback_lang);
 
 /**
  * @brief Смена текущего языка интерфейса.

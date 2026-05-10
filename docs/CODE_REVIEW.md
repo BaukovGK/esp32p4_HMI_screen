@@ -267,13 +267,15 @@ main/
 - **Top-1..5** — отказы при первом запуске на железе, нельзя заливать без них
 - **COMPLETED via commit 6aae3cb** тремя параллельными агентами
 
-### 🟨 Спринт 2 (data integrity — 2 дня) — PARTIAL DONE
-- **Top-6..10, 12, 13, 15** — потеря данных, скрытые баги, ресурс-leaks → **DONE (commit 6aae3cb)**
-- **Top-11, 14** — остаются открытыми (требуют отдельной работы)
+### ✅ Спринт 2 (data integrity — 2 дня) — DONE 2026-05-10
+- **Top-6..10, 12, 13, 15** → DONE (commit 6aae3cb)
+- **Top-11** (NVS worker queue) → DONE (commit abd429b) — новые `nvs_worker.{c,h}` + `plant_data_internal.h`
+- **Top-14** (eth_init resource leak) → DONE (commit abd429b) — `goto cleanup` + `eth_deinit()`
 
-### Спринт 3 (зрелость — 3-5 дней)
-- Вся секция HIGH — backoff, версионирование зависимостей, partitions, WDT регистрация
-- Структурное предложение: вынести board → `components/bsp_waveshare_p4_nano/`
+### 🟨 Спринт 3 (зрелость — 3-5 дней) — PARTIAL DONE
+- ✅ H_c (i2c bus mutex), H_e (HAL не зависит от services), H_e2 (event_loop INVALID_STATE), H7 (_Static_assert на топики), M_c2/M_c3 (lang thread-safety) → DONE (commit abd429b)
+- 🟡 Остаётся секция HIGH: H1 (subscribe failed handling), H2 (фрагменты), H_b (i2c pullup), H_d (DSI cache coherency), H_d2 (draw-buffer для ландшафта), H_b4 (partitions), H5/H6/H8 — мелкие
+- 📦 Структурное предложение: вынести board → `components/bsp_waveshare_p4_nano/`
 
 ### Backlog (когда переделается UI)
 - Все MEDIUM/LOW
@@ -284,4 +286,5 @@ main/
 ## История
 
 - **2026-05-10**: первое полное ревью HMI после интеграции с актуальным API контроллера. UI-слой не покрыт по запросу пользователя (предстоит переделка).
-- **2026-05-10 — commit 6aae3cb**: закрыто 13 из 15 Top-проблем (✅ Top-1..10, 12, 13, 15) тремя параллельными агентами за один спринт. Остаются открытыми: Top-11 (NVS worker queue для UI-блокировок) и Top-14 (eth_init resource leak на cascading errors).
+- **2026-05-10 — commit 6aae3cb**: Sprint 1, закрыто 13 из 15 Top-проблем (✅ Top-1..10, 12, 13, 15) тремя параллельными агентами. Остаются Top-11 и Top-14.
+- **2026-05-10 — commit abd429b**: Sprint 2, закрыты остатки Top-15 (Top-11 NVS worker queue, Top-14 eth_init resource leak) + 5 проблем категории HIGH/MEDIUM (H_c, H_e, H_e2, H7, M_c2/M_c3) тремя параллельными агентами. **Top-15 ПОЛНОСТЬЮ ЗАКРЫТ.** Из 19 HIGH остаётся ~9 (общая категория HIGH без Top-15).
