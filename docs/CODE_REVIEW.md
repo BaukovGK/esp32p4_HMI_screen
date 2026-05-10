@@ -272,10 +272,10 @@ main/
 - **Top-11** (NVS worker queue) → DONE (commit abd429b) — новые `nvs_worker.{c,h}` + `plant_data_internal.h`
 - **Top-14** (eth_init resource leak) → DONE (commit abd429b) — `goto cleanup` + `eth_deinit()`
 
-### 🟨 Спринт 3 (зрелость — 3-5 дней) — PARTIAL DONE
-- ✅ H_c (i2c bus mutex), H_e (HAL не зависит от services), H_e2 (event_loop INVALID_STATE), H7 (_Static_assert на топики), M_c2/M_c3 (lang thread-safety) → DONE (commit abd429b)
-- 🟡 Остаётся секция HIGH: H1 (subscribe failed handling), H2 (фрагменты), H_b (i2c pullup), H_d (DSI cache coherency), H_d2 (draw-buffer для ландшафта), H_b4 (partitions), H5/H6/H8 — мелкие
-- 📦 Структурное предложение: вынести board → `components/bsp_waveshare_p4_nano/`
+### ✅ Спринт 3 (зрелость) — DONE 2026-05-10
+- Sprint 2 commit abd429b: H_c, H_e, H_e2, H7, M_c2/M_c3
+- Sprint 3 final commit: H1 (SUBSCRIBE_FAILED + ACL-deny detection), H2 (MQTT fragments assembly до 8К), H6 (json_get_u32 для uint32 cJSON), H8 (reconnect attempts counter), H_b (i2c pullup → external), H_d (DSI cache coherency комментарий), H_d2 (draw-buffer + _Static_assert), H_b4 (partitions OTA-ready 16MB), M_c1 (WDT регистрация LVGL + heap baseline log)
+- 📦 Структурное предложение (board → `components/bsp_waveshare_p4_nano/`) — backlog
 
 ### Backlog (когда переделается UI)
 - Все MEDIUM/LOW
@@ -288,3 +288,8 @@ main/
 - **2026-05-10**: первое полное ревью HMI после интеграции с актуальным API контроллера. UI-слой не покрыт по запросу пользователя (предстоит переделка).
 - **2026-05-10 — commit 6aae3cb**: Sprint 1, закрыто 13 из 15 Top-проблем (✅ Top-1..10, 12, 13, 15) тремя параллельными агентами. Остаются Top-11 и Top-14.
 - **2026-05-10 — commit abd429b**: Sprint 2, закрыты остатки Top-15 (Top-11 NVS worker queue, Top-14 eth_init resource leak) + 5 проблем категории HIGH/MEDIUM (H_c, H_e, H_e2, H7, M_c2/M_c3) тремя параллельными агентами. **Top-15 ПОЛНОСТЬЮ ЗАКРЫТ.** Из 19 HIGH остаётся ~9 (общая категория HIGH без Top-15).
+- **2026-05-10 — Sprint 3**: закрыты оставшиеся HIGH тремя параллельными агентами:
+  - MQTT robustness: H1 (SUBSCRIBE_FAILED tracking + ACL-deny detection), H2 (MQTT fragment reassembly буфер 8K), H6 (json_get_u32 для безопасного чтения uint32 из cJSON), H8 (reconnect attempts counter)
+  - HAL hardware: H_b (i2c internal pullup → external 4.7-10K), H_d (DSI cache coherency комментарий), H_d2 (draw-buffer + _Static_assert)
+  - Build/runtime: H_b4 (partitions.csv → OTA-ready: ota_0/ota_1 по 3MB + nvs_storage 1MB), M_c1 (WDT регистрация LVGL task + heap baseline log)
+  - **Все блокеры устранены.** Остаются MEDIUM/LOW (косметика, TLS+auth для cloud, OTA migration plant_data → nvs_storage namespace).

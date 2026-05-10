@@ -29,6 +29,7 @@
 #include "esp_log.h"
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
 
 static const char *TAG = "mqtt_parse";
 
@@ -88,6 +89,27 @@ static int64_t json_get_int64(const cJSON *obj, const char *key, int64_t def)
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     if (!item || !cJSON_IsNumber(item)) return def;
     return (int64_t)item->valuedouble;
+}
+
+/**
+ * Безопасное чтение uint32 из cJSON-объекта.
+ *
+ * cJSON хранит число как double; для uint32 значения >2^31 не помещаются
+ * в `valueint` (int) и приходят отрицательными. Используем `valuedouble`
+ * с проверкой диапазона [0, UINT32_MAX].
+ *
+ * @param obj            JSON-объект
+ * @param key            Имя ключа
+ * @param default_value  Значение по умолчанию (если ключ отсутствует или вне диапазона)
+ * @return uint32 из JSON, или default_value
+ */
+static uint32_t json_get_u32(const cJSON *obj, const char *key, uint32_t default_value)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (!item || !cJSON_IsNumber(item)) return default_value;
+    double v = item->valuedouble;
+    if (v < 0.0 || v > (double)UINT32_MAX) return default_value;
+    return (uint32_t)v;
 }
 
 /**
@@ -189,7 +211,7 @@ static void parse_state(const cJSON *json)
     }
     auto_sub_state_t asub = parse_auto_sub(json_get_string(json, "auto_sub", NULL));
     wash_sub_state_t wsub = parse_wash_sub(json_get_string(json, "wash_sub", NULL));
-    uint32_t ff = (uint32_t)json_get_int(json, "fault_flags", 0);
+    uint32_t ff = json_get_u32(json, "fault_flags", 0);
     plant_data_set_state(st, asub, wsub, ff);
 }
 
@@ -378,7 +400,7 @@ static void parse_doser(const cJSON *json)
  */
 static void parse_interlocks(const cJSON *json)
 {
-    uint32_t flags = (uint32_t)json_get_int(json, "flags", 0);
+    uint32_t flags = json_get_u32(json, "flags", 0);
     bool estop = json_get_bool(json, "estop", false);
     bool fw = json_get_bool(json, "filter_warn", false);
     plant_data_set_interlocks(flags, estop, fw);
@@ -396,20 +418,20 @@ static void parse_interlocks(const cJSON *json)
 static void parse_diagnostics(const cJSON *json)
 {
     diagnostics_t diag = {0};
-    diag.heap_free = (uint32_t)json_get_int(json, "heap_free", 0);
-    diag.heap_min  = (uint32_t)json_get_int(json, "heap_min", 0);
+    diag.heap_free = json_get_u32(json, "heap_free", 0);
+    diag.heap_min  = json_get_u32(json, "heap_min", 0);
     diag.uptime_s  = json_get_int64(json, "uptime_s", 0);
-    diag.wdt_stale = (uint32_t)json_get_int(json, "wdt_stale", 0);
+    diag.wdt_stale = json_get_u32(json, "wdt_stale", 0);
 
     // Парсинг вложенного объекта остатков стеков задач.
     // Ключи стека динамические (имена FreeRTOS-задач) — мэппим по фактическим именам.
     cJSON *stack = cJSON_GetObjectItemCaseSensitive(json, "stack");
     if (stack && cJSON_IsObject(stack)) {
-        diag.stack_modbus   = (uint32_t)json_get_int(stack, "modbus", 0);
-        diag.stack_io       = (uint32_t)json_get_int(stack, "io", 0);
-        diag.stack_process  = (uint32_t)json_get_int(stack, "process", 0);
-        diag.stack_watchdog = (uint32_t)json_get_int(stack, "watchdog", 0);
-        diag.stack_mqtt     = (uint32_t)json_get_int(stack, "mqtt", 0);
+        diag.stack_modbus   = json_get_u32(stack, "modbus", 0);
+        diag.stack_io       = json_get_u32(stack, "io", 0);
+        diag.stack_process  = json_get_u32(stack, "process", 0);
+        diag.stack_watchdog = json_get_u32(stack, "watchdog", 0);
+        diag.stack_mqtt     = json_get_u32(stack, "mqtt", 0);
     }
 
     /*
@@ -426,7 +448,7 @@ static void parse_diagnostics(const cJSON *json)
         for (int i = 0; i < n; i++) {
             cJSON *dev = cJSON_GetArrayItem(modbus, i);
             if (!dev || !cJSON_IsObject(dev)) continue;
-            diag.modbus_errors[i] = (uint32_t)json_get_int(dev, "errors", 0);
+            diag.modbus_errors[i] = json_get_u32(dev, "errors", 0);
             diag.modbus_online[i] = json_get_bool(dev, "online", false);
         }
         // Оставшиеся слоты (если устройств меньше 4) сбросить в "оффлайн без ошибок"
@@ -468,7 +490,7 @@ static alarm_category_t parse_alarm_cat(const char *s)
 static void parse_alarm(const cJSON *json)
 {
     alarm_entry_t entry = {0};
-    entry.id = (uint32_t)json_get_int(json, "id", 0);
+    entry.id = json_get_u32(json, "id", 0);
     entry.ts = json_get_int64(json, "ts", 0);
     entry.cat = parse_alarm_cat(json_get_string(json, "cat", "INFO"));
     entry.value = json_get_float(json, "value", 0);
