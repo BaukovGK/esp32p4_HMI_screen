@@ -88,20 +88,68 @@ static void on_tab_select(ui_tab_id_t tab)
     ui_switch_screen(TAB_TO_SCREEN[tab]);
 }
 
-/* ─── callback пересоздания UI после смены темы ───────────────────── */
+/* ─── callback пересоздания UI после смены темы ────────────────────
+ * on_theme_change вызывается из обработчика click'а на кнопку темы
+ * в statusbar'е. Удалять объекты в этом контексте небезопасно (мы
+ * внутри event'а самой кнопки). Поэтому ставим флаг — рестарт UI
+ * выполнится в следующем тике refresh_timer_cb. */
+static volatile bool s_theme_rebuild_pending = false;
+
 static void on_theme_change(void)
 {
-    /* TODO: полноценный rebuild — пересоздать statusbar/tabbar/content
-     * и заново инициализировать тему LVGL. На данный момент новые цвета
-     * подхватываются только при следующем create-цикле виджетов
-     * (ui_switch_screen или после lv_refresh). */
-    ESP_LOGI(TAG, "Theme changed — rebuild deferred (TODO)");
+    s_theme_rebuild_pending = true;
+}
+
+/* Полный rebuild: удалить statusbar/content/tabbar/current screen,
+ * пересоздать всё с актуальной темой. Вызывается под LVGL lock'ом. */
+static void rebuild_ui_locked(void)
+{
+    screen_id_t saved = s_current;
+
+    if (s_screen_obj) { lv_obj_delete(s_screen_obj); s_screen_obj = NULL; }
+    if (s_content)    { lv_obj_delete(s_content);    s_content = NULL; }
+    if (s_tabbar)     { lv_obj_delete(s_tabbar);     s_tabbar = NULL; }
+    if (s_statusbar)  { lv_obj_delete(s_statusbar);  s_statusbar = NULL; }
+
+    ui_theme_init();
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, ui_token_bg_base(), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+    s_statusbar = ui_statusbar_create(scr, on_theme_change);
+
+    s_content = lv_obj_create(scr);
+    lv_obj_set_size(s_content, UI_SCREEN_W, UI_CONTENT_H);
+    lv_obj_set_pos(s_content, 0, UI_STATUSBAR_H);
+    lv_obj_set_style_bg_color(s_content, ui_token_bg_base(), 0);
+    lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_content, 0, 0);
+    lv_obj_set_style_border_width(s_content, 0, 0);
+    lv_obj_set_style_pad_all(s_content, 0, 0);
+    lv_obj_remove_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_tabbar = ui_tabbar_create(scr, on_tab_select);
+
+    s_current = saved;
+    s_screen_obj = s_screens[saved].create(s_content);
+    ui_tab_id_t tab = screen_to_tab(saved);
+    if (tab != UI_TAB_COUNT) ui_tabbar_set_active(s_tabbar, tab);
+
+    ESP_LOGI(TAG, "UI rebuilt for theme %d", ui_tokens_get_theme());
 }
 
 /* ─── refresh-таймер ──────────────────────────────────────────────── */
 static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
+
+    /* Если ожидается смена темы — сначала rebuild, потом обычный update. */
+    if (s_theme_rebuild_pending) {
+        s_theme_rebuild_pending = false;
+        rebuild_ui_locked();
+        return;   /* update в следующем тике */
+    }
+
     if (!plant_data_lock(5)) return;
 
     const plant_data_t *data = plant_data_get();

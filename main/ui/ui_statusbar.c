@@ -36,13 +36,15 @@ static void theme_btn_cb(lv_event_t *e)
     ui_theme_id_t next = (cur == UI_THEME_DARK) ? UI_THEME_LIGHT : UI_THEME_DARK;
     ui_tokens_set_theme(next);
 
-    /* Сменить глиф ☾↔☀ */
+    /* Глифы ☾/☀ отсутствуют в Montserrat fonts проекта → ASCII fallback.
+     * "DK" = dark mode active (нажми чтоб включить light)
+     * "LT" = light mode active (нажми чтоб включить dark) */
     if (s_sb.theme_btn_label) {
-        lv_label_set_text(s_sb.theme_btn_label, next == UI_THEME_DARK ? "\xE2\x98\x80" : "\xE2\x98\xBE");
-        /* ☀ = U+2600 (e2 98 80), ☾ = U+263E (e2 98 be) */
+        lv_label_set_text(s_sb.theme_btn_label,
+            next == UI_THEME_DARK ? "DK" : "LT");
     }
 
-    /* Поднять обратно — пусть main пересоздаст экраны со свежими цветами. */
+    /* Поднять обратно — caller'у нужно пересоздать UI со свежими цветами. */
     if (s_sb.on_theme_change) s_sb.on_theme_change();
 }
 
@@ -146,9 +148,9 @@ lv_obj_t *ui_statusbar_create(lv_obj_t *parent, ui_statusbar_theme_cb_t on_theme
     lv_obj_set_style_text_color(s_sb.conn_label, ui_token_text_secondary(), 0);
     lv_obj_set_style_text_font(s_sb.conn_label, UI_FONT_SM, 0);
 
-    /* 4. Кнопка темы (☾/☀) */
+    /* 4. Кнопка темы (LT/DK ASCII fallback вместо ☾/☀ Unicode). */
     s_sb.theme_btn = make_sb_btn(bar,
-                                 ui_tokens_get_theme() == UI_THEME_DARK ? "\xE2\x98\x80" : "\xE2\x98\xBE",
+                                 ui_tokens_get_theme() == UI_THEME_DARK ? "DK" : "LT",
                                  theme_btn_cb,
                                  &s_sb.theme_btn_label);
 

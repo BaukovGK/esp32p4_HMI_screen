@@ -321,15 +321,76 @@ static void on_tab_select(ui_tab_id_t tab)
     preview_switch_screen(tab_to_screen(tab));
 }
 
+/* Флаг "нужен rebuild UI после смены темы". Выставляется в
+ * on_theme_change (callback из event handler'а), читается в
+ * preview_refresh_cb (запускается из lv_timer_handler уже ВНЕ event'а)
+ * — так избегаем delete объекта во время обработки его event'а. */
+static volatile bool s_theme_rebuild_pending = false;
+
 static void on_theme_change(void)
 {
-    /* TODO: пересоздать UI после переключения темы. Пока no-op —
-     * новые цвета подхватятся при следующем lv_obj_invalidate. */
+    s_theme_rebuild_pending = true;
+}
+
+/* Полный rebuild UI — пересоздаёт statusbar/content/tabbar/текущий
+ * экран со свежими цветами активной темы. */
+static void rebuild_ui(void)
+{
+    /* Сохранить идентификатор текущего экрана. */
+    int saved_screen = s_current_screen;
+
+    /* Удалить всё. Дети тоже удалятся (s_screen_obj — child s_content). */
+    if (s_screen_obj) { lv_obj_delete(s_screen_obj); s_screen_obj = NULL; }
+    if (s_content)    { lv_obj_delete(s_content);    s_content = NULL; }
+    if (s_tabbar)     { lv_obj_delete(s_tabbar);     s_tabbar = NULL; }
+    if (s_statusbar)  { lv_obj_delete(s_statusbar);  s_statusbar = NULL; }
+
+    /* Реинициализация (тот же flow что в lvgl_live_preview_init). */
+    ui_theme_init();
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, ui_token_bg_base(), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+    s_statusbar = ui_statusbar_create(scr, on_theme_change);
+
+    s_content = lv_obj_create(scr);
+    lv_obj_set_size(s_content, UI_SCREEN_W, UI_CONTENT_H);
+    lv_obj_set_pos(s_content, 0, UI_STATUSBAR_H);
+    lv_obj_set_style_bg_color(s_content, ui_token_bg_base(), 0);
+    lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_content, 0, 0);
+    lv_obj_set_style_border_width(s_content, 0, 0);
+    lv_obj_set_style_pad_all(s_content, 0, 0);
+    lv_obj_remove_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_tabbar = ui_tabbar_create(scr, on_tab_select);
+
+    /* Восстановить экран. */
+    s_current_screen = saved_screen;
+    s_screen_obj = s_screens[saved_screen].create(s_content);
+    ui_tab_id_t tab = screen_to_tab(saved_screen);
+    if (tab != UI_TAB_COUNT) ui_tabbar_set_active(s_tabbar, tab);
+
+    /* Заполнить mock-данными. */
+    ui_statusbar_update(s_statusbar, &s_preview_data);
+    if (s_screens[saved_screen].update && s_screen_obj) {
+        s_screens[saved_screen].update(s_screen_obj, &s_preview_data, ~0u);
+    }
 }
 
 static void preview_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
+
+    /* Если запрошена смена темы — пересоздать UI ПРЕЖДЕ обычного update.
+     * К этому моменту event handler уже завершился, объекты безопасно
+     * удалять. */
+    if (s_theme_rebuild_pending) {
+        s_theme_rebuild_pending = false;
+        rebuild_ui();
+        return;   /* update будет в следующем тике */
+    }
+
     ui_statusbar_update(s_statusbar, &s_preview_data);
     if (s_screens[s_current_screen].update && s_screen_obj) {
         s_screens[s_current_screen].update(s_screen_obj, &s_preview_data, ~0u);
