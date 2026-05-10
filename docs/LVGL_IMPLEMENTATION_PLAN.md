@@ -52,17 +52,25 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
       Контекст в user_data shell'а, авто-освобождение через LV_EVENT_DELETE.
       ⚠️ TODO: анимация волны (translateX, 5s ease-in-out) — фаза 7.
       ⚠️ TODO: dashed pattern на probe — пока solid с opacity 55%.
-- [ ] **Pump widget** — `ui_pump_create(parent, cx, cy)`:
-      circle + 4 импеллер-blade'а + hub + label. Состояния через
-      `ui_pump_set_state(obj, UI_PUMP_RUNNING)`. Вращение ротора —
-      `lv_anim_t` на transform_angle.
-- [ ] **Filter widget** — `ui_filter_create(parent, cx, cy)`: ромб
-      40×40 (через `lv_canvas` или 4 lines в `lv_obj`) + "Ф".
-- [ ] **Membrane widget** — `ui_membrane_create(parent, geometry, label)`.
-- [ ] **Sensor circle** — `ui_sensor_create(parent, tag, x, y)`: круг
-      r=22 с tag/value + tap + leader-line. Состояния warn/danger/offline.
-- [ ] **Pipe widget** — функция `ui_pipe_active(parent, x1, y1, x2, y2)`
-      рисует pipe + flow-overlay (animated stroke-dashoffset эквивалент).
+- [x] **Pump widget** (`ui_pump.h/.c`) — circle r=26 с rotating impeller
+      (cross-pattern из 2 перпендикулярных лопастей + hub). 4 состояния
+      через `ui_pump_set_state()`: running (1.5s rotation), starting
+      (3s rotation + 1.2s opacity pulse), error (no rotation +
+      1.0s pulse), off (static). LVGL anim на transform_rotation
+      (0..3600 = 0..360°).
+- [x] **Filter widget** (`ui_filter.h/.c`) — rect 28×28 повёрнутый на 45°
+      даёт ромб 40×40 (диагональ). Буква "Ф" поверх (UI_FONT_SM).
+      Подзаголовок "Фильтр" под ромбом.
+- [x] **Membrane widget** (`ui_membrane.h/.c`) — rect с label сверху
+      и dashed-divider посередине (имитация раздела элементов 4040).
+- [x] **Sensor circle** (`ui_sensor.h/.c`) — leader (lv_line) + tap-point
+      + circle root c frame/divider/tag/value. 4 состояния:
+      ok/warn/danger/offline. Все 3 элемента (leader, tap, circle) —
+      siblings; контекст хранит ссылки и удаляет их вместе.
+- [x] **Pipe helpers** (`ui_pipe.h/.c`) — `ui_pipe_segment(p, x1,y1,x2,y2,
+      kind)` для горизонтальных/вертикальных сегментов через lv_line;
+      kind = INACTIVE/ACTIVE/RECYCLE. `ui_pipe_junction(p, cx, cy)` —
+      filled circle 8×8 для узла трубопровода.
 - [ ] **Mnemo composer** — собирает всю мнемосхему по координатам из
       `proto/index.html`. Главный target: `scr_mnemonic.c` после
       переписывания.
