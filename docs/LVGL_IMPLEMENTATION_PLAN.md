@@ -133,11 +133,16 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 - [ ] (TODO в фазе 6) Time elapsed/remaining — пока mock "--:--",
       реальные значения придут по washing/elapsed_s MQTT-topic'у.
 
-### Фаза 5 — Настройки + Отладка
-- [ ] Перерисовать `scr_settings.c` под новую вёрстку (220px nav-list +
-      content).
-- [ ] Перерисовать `scr_diagnostics.c` под новую вёрстку (debug log +
-      sidebar 320px).
+### Фаза 5 — Настройки + Отладка ✅ (минимальная миграция)
+- [x] COLOR_* макросы в ui_theme.h перенаправлены на ui_token_*()
+      функции. Старые экраны (scr_settings, scr_diagnostics, scr_alarms,
+      scr_parameters, ui_common::alarm_bar/nav_bar) теперь автоматически
+      адаптируются под активную light/dark тему. Visual consistency
+      достигнута без полного rewrite'а 913 строк.
+- [ ] (Опционально, низкий приоритет) Полная перерисовка scr_settings/
+      diagnostics под layout из proto/settings.html и proto/debug.html
+      (220px nav + content, log + 320px sidebar). Текущие версии
+      функционально полноценны, отличаются только versткой.
 
 ### Фаза 6 — runtime интеграция
 - [ ] Кнопки `[data-action]` → `ui_events.c` подписки на MQTT-команды.

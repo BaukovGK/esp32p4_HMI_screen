@@ -11,36 +11,45 @@
 #include "lvgl.h"
 #include "ui_tokens.h"   /* источник истины для размеров и цветов */
 
-/* === Основная тёмная палитра === */
-#define COLOR_BG_DARK       lv_color_hex(0x1A1A2E)  // Тёмный фон экрана
-#define COLOR_BG_PANEL      lv_color_hex(0x16213E)  // Фон панелей (alarm bar, nav bar)
-#define COLOR_BG_WIDGET     lv_color_hex(0x0F3460)  // Фон виджетов и кнопок
-#define COLOR_TEXT_PRIMARY   lv_color_hex(0xE8E8E8)  // Основной текст (светло-серый)
-#define COLOR_TEXT_SECONDARY lv_color_hex(0x8899AA)  // Вторичный текст (приглушённый)
-#define COLOR_TEXT_VALUE     lv_color_hex(0x00FF88)  // Числовые значения (зелёный)
-#define COLOR_ACCENT         lv_color_hex(0x00B4D8)  // Акцентный цвет (голубой)
-#define COLOR_BTN_PRIMARY    lv_color_hex(0x0077B6)  // Основные кнопки (синий)
-#define COLOR_BTN_DANGER     lv_color_hex(0xE63946)  // Кнопка "Нет" / опасное действие
-#define COLOR_BTN_SUCCESS    lv_color_hex(0x2D6A4F)  // Кнопка "Да" / подтверждение
+/* === Цветовая палитра — алиасы на ui_token_*() для legacy-кода ===
+ *
+ * Старые экраны (scr_settings, scr_diagnostics, scr_alarms, scr_parameters,
+ * ui_common::alarm_bar/nav_bar) используют эти макросы напрямую. Они
+ * остаются для обратной совместимости, но теперь читают значения из
+ * активной темы (light/dark) через ui_token_*() — при переключении
+ * темы автоматически адаптируются.
+ *
+ * Новый код использовать ui_token_*() напрямую (см. ui_tokens.h §цвета).
+ */
+#define COLOR_BG_DARK         ui_token_bg_base()
+#define COLOR_BG_PANEL        ui_token_bg_card()
+#define COLOR_BG_WIDGET       ui_token_bg_elev()
+#define COLOR_TEXT_PRIMARY    ui_token_text_primary()
+#define COLOR_TEXT_SECONDARY  ui_token_text_secondary()
+#define COLOR_TEXT_VALUE      ui_token_success()
+#define COLOR_ACCENT          ui_token_accent()
+#define COLOR_BTN_PRIMARY     ui_token_accent()
+#define COLOR_BTN_DANGER      ui_token_danger()
+#define COLOR_BTN_SUCCESS     ui_token_success()
 
 /* === Цвета индикации состояния установки === */
-#define COLOR_STATE_IDLE     lv_color_hex(0x6C757D)  // ОЖИДАНИЕ -- серый
-#define COLOR_STATE_AUTO     lv_color_hex(0x28A745)  // АВТО -- зелёный
-#define COLOR_STATE_WASHING  lv_color_hex(0x007BFF)  // ПРОМЫВКА -- синий
-#define COLOR_STATE_MANUAL   lv_color_hex(0xFFC107)  // РУЧНОЙ -- жёлтый
-#define COLOR_STATE_FAULT    lv_color_hex(0xDC3545)  // АВАРИЯ -- красный
+#define COLOR_STATE_IDLE      ui_token_text_muted()
+#define COLOR_STATE_AUTO      ui_token_success()
+#define COLOR_STATE_WASHING   ui_token_info()
+#define COLOR_STATE_MANUAL    ui_token_warning()
+#define COLOR_STATE_FAULT     ui_token_danger()
 
 /* === Цвета категорий аварий === */
-#define COLOR_ALARM_CRITICAL lv_color_hex(0xFF0000)  // Критическая -- ярко-красный
-#define COLOR_ALARM_ALARM    lv_color_hex(0xFF8C00)  // Авария -- оранжевый
-#define COLOR_ALARM_WARNING  lv_color_hex(0xFFD700)  // Предупреждение -- жёлтый
-#define COLOR_ALARM_INFO     lv_color_hex(0x6C757D)  // Информация -- серый
+#define COLOR_ALARM_CRITICAL  ui_token_danger()
+#define COLOR_ALARM_ALARM     ui_token_danger()
+#define COLOR_ALARM_WARNING   ui_token_warning()
+#define COLOR_ALARM_INFO      ui_token_text_muted()
 
 /* === Цвета индикаторов насосов на мнемосхеме === */
-#define COLOR_PUMP_OFF       lv_color_hex(0x4A4A4A)  // Насос выключен -- тёмно-серый
-#define COLOR_PUMP_STARTING  lv_color_hex(0xFFD700)  // Насос запускается -- жёлтый
-#define COLOR_PUMP_RUNNING   lv_color_hex(0x00FF88)  // Насос работает -- зелёный
-#define COLOR_PUMP_FAULT     lv_color_hex(0xFF0000)  // Неисправность насоса -- красный
+#define COLOR_PUMP_OFF        ui_token_bg_mute()
+#define COLOR_PUMP_STARTING   ui_token_warning()
+#define COLOR_PUMP_RUNNING    ui_token_accent()
+#define COLOR_PUMP_FAULT      ui_token_danger()
 
 /* Размеры основных UI-областей.
  *
