@@ -198,8 +198,10 @@ void ui_statusbar_update(lv_obj_t *bar, const plant_data_t *data)
             lv_label_set_text(s_sb.status_label, lang_str(STR_STATUS_NO_DATA));
             lv_obj_set_style_text_color(s_sb.status_label, ui_token_danger(), 0);
         } else {
-            alarm_record_t worst;
-            if (alarm_ring_get_worst(&worst) && worst.active) {
+            /* alarm_ring API возвращает массив; берём только первую активную
+             * запись (индексируется по приоритету категории внутри ring'а). */
+            alarm_entry_t worst;
+            if (alarm_ring_get_active(&worst, 1) > 0) {
                 lv_label_set_text(s_sb.status_label, worst.code);
                 lv_color_t color;
                 switch (worst.cat) {
