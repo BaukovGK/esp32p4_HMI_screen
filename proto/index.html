@@ -273,11 +273,20 @@
                     <text class="label" x="178" y="205" text-anchor="middle" data-i18n="main.pump_pre">Преднагн.</text>
                     <text class="label-sm" x="178" y="225" text-anchor="middle">RO1 · DI6 ●</text>
 
-                    <!-- Дозатор — короткое ответвление вниз от преднагнетания -->
-                    <line class="pipe" x1="178" y1="240" x2="178" y2="265"/>
+                    <!-- ════════════════════════════════════════════════════════════
+                         ДОЗАТОР — подключается к pipe (преднагн → фильтр), не к блоку.
+                         Реагент впрыскивается в трубу через специальный T-стык.
+                         Линия идёт: Дозатор out → вниз → вправо → вверх к pipe.
+                         ════════════════════════════════════════════════════════════ -->
                     <rect class="equipment-bg" x="140" y="265" width="76" height="40" rx="6"/>
                     <text class="label" x="178" y="285" text-anchor="middle" data-i18n="main.doser">Дозатор</text>
                     <text class="label-sm" x="178" y="298" text-anchor="middle">RO5 · OFF</text>
+                    <!-- Connecting pipe от дозатора до точки врезки (250, 210) -->
+                    <line class="pipe" x1="178" y1="305" x2="178" y2="325"/>
+                    <line class="pipe" x1="178" y1="325" x2="250" y2="325"/>
+                    <line class="pipe" x1="250" y1="325" x2="250" y2="210"/>
+                    <!-- Junction на pipe-active преднагн→фильтр (точка врезки реагента) -->
+                    <circle class="pipe-junction" cx="250" cy="210" r="4"/>
 
                     <!-- труба от преднагн → фильтр, с tap-points P1 + Q1 -->
                     <line class="pipe-active" x1="216" y1="210" x2="290" y2="210"/>
@@ -354,30 +363,21 @@
                     <line x1="590" y1="225" x2="710" y2="225" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.5"/>
 
                     <!-- ════════════════════════════════════════════════════════════
-                         OUTLET-ТРУБА КОНЦЕНТРАТА мембраны 1: короткий pipe-active
-                         от right-edge мембраны (x=710) до точки разветвления (x=770).
-                         Здесь рецикл и дренаж разветвляются — junction на чистой
-                         трубе, не на крае блока (visual clearance).
-                         ════════════════════════════════════════════════════════════ -->
-                    <line class="pipe-active" x1="710" y1="210" x2="770" y2="210"/>
-                    <line class="pipe-flow" x1="710" y1="210" x2="770" y2="210"/>
-
-                    <!-- ════════════════════════════════════════════════════════════
-                         РЕЦИКЛ 1-й СТУПЕНИ — петля сверху, подключённая К ТРУБАМ:
-                         • НАЧАЛО: junction на outlet-трубе мембраны 1 в (770, 210)
+                         РЕЦИКЛ 1-й СТУПЕНИ — выход концентрата СВЕРХУ мембраны 1
+                         (отдельная труба от рецикла, не общая с дренажом):
+                         • НАЧАЛО: на top-edge мембраны 1 в (650, 180)
                          • КОНЕЦ: junction на pipe-active (фильтр→насос 1ст) в (420, 210)
                          ════════════════════════════════════════════════════════════ -->
-                    <line class="pipe-recycle flowing" x1="770" y1="210" x2="770" y2="100"/>
-                    <line class="pipe-recycle flowing" x1="770" y1="100" x2="420" y2="100"/>
+                    <line class="pipe-recycle flowing" x1="650" y1="180" x2="650" y2="100"/>
+                    <line class="pipe-recycle flowing" x1="650" y1="100" x2="420" y2="100"/>
                     <line class="pipe-recycle flowing" x1="420" y1="100" x2="420" y2="210"/>
-                    <circle class="pipe-junction" cx="770" cy="210" r="4"/>
                     <circle class="pipe-junction" cx="420" cy="210" r="4"/>
 
-                    <!-- ═══ Q2 — расход рецикла 1ст (на горизонтальной части петли) ═══ -->
+                    <!-- ═══ Q2 — расход рецикла 1ст ═══ -->
                     <g class="sensor-group">
-                        <line class="sc-leader" x1="595" y1="100" x2="595" y2="68"/>
-                        <circle class="sc-tap" cx="595" cy="100" r="3.5"/>
-                        <g class="sensor-circle" transform="translate(595,45)">
+                        <line class="sc-leader" x1="535" y1="100" x2="535" y2="68"/>
+                        <circle class="sc-tap" cx="535" cy="100" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(535,45)">
                             <circle class="sc-frame" r="22"/>
                             <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
                             <text class="sc-tag" y="-10">Q2</text>
@@ -385,10 +385,13 @@
                         </g>
                     </g>
 
-                    <!-- Дренаж — продолжение трубы концентрата дальше вправо (серое,
-                         вентиль закрыт — концентрат уходит на рецикл, не на дренаж) -->
-                    <line class="pipe" x1="770" y1="210" x2="830" y2="210"/>
-                    <text class="label-sm" x="833" y="214">дренаж</text>
+                    <!-- ════════════════════════════════════════════════════════════
+                         ДРЕНАЖ — отдельная труба от right-edge мембраны 1.
+                         Серая (вентиль закрыт в обычном режиме), концентрат уходит
+                         на дренаж только при ручном открытии.
+                         ════════════════════════════════════════════════════════════ -->
+                    <line class="pipe" x1="710" y1="210" x2="790" y2="210"/>
+                    <text class="label-sm" x="793" y="214">дренаж</text>
 
                     <!-- ════════════════════════════════════════════════════════════
                          СВЯЗЬ row 1 → row 2: пермеат от мембраны 1 вниз к промежуточной
@@ -464,16 +467,16 @@
                          • КОНЕЦ: junction на pipe-active (промеж→насос 2) в (530, 350)
                          ════════════════════════════════════════════════════════════ -->
                     <line class="pipe-recycle flowing" x1="340" y1="410" x2="340" y2="470"/>
-                    <line class="pipe-recycle flowing" x1="340" y1="470" x2="530" y2="470"/>
-                    <line class="pipe-recycle flowing" x1="530" y1="470" x2="530" y2="350"/>
+                    <line class="pipe-recycle flowing" x1="340" y1="470" x2="560" y2="470"/>
+                    <line class="pipe-recycle flowing" x1="560" y1="470" x2="560" y2="350"/>
                     <circle class="pipe-junction" cx="340" cy="410" r="4"/>
-                    <circle class="pipe-junction" cx="530" cy="350" r="4"/>
+                    <circle class="pipe-junction" cx="560" cy="350" r="4"/>
 
                     <!-- ═══ Q4 — расход рецикла 2ст (под петлёй) ═══ -->
                     <g class="sensor-group">
-                        <line class="sc-leader" x1="430" y1="470" x2="430" y2="513"/>
-                        <circle class="sc-tap" cx="430" cy="470" r="3.5"/>
-                        <g class="sensor-circle" transform="translate(430,538)">
+                        <line class="sc-leader" x1="450" y1="470" x2="450" y2="513"/>
+                        <circle class="sc-tap" cx="450" cy="470" r="3.5"/>
+                        <g class="sensor-circle" transform="translate(450,538)">
                             <circle class="sc-frame" r="22"/>
                             <line class="sc-divider" x1="-22" y1="0" x2="22" y2="0"/>
                             <text class="sc-tag" y="-10">Q4</text>
