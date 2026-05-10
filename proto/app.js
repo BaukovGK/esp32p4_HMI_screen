@@ -342,6 +342,226 @@ function startMockData() {
     setInterval(tick, 1000);
 }
 
+/* ───── sensor metadata (для подробного модала по клику) ───── */
+const sensorMeta = {
+    P1: {
+        name_ru: 'Давление после насоса преднагнетания',
+        name_en: 'Pressure after pre-pump',
+        unit: 'bar', range: [0, 6],
+        warn_at: 5.0, alarm_at: 5.5,
+        modbus: 'Slave 1 · AI1 · 4–20 mA',
+        location: 'после насоса преднагнетания (RO1)',
+        loc_en: 'after pre-pump (RO1)',
+    },
+    P2: {
+        name_ru: 'Давление после фильтра мехочистки',
+        name_en: 'Pressure after mechanical filter',
+        unit: 'bar', range: [0, 6],
+        warn_at: 4.5, alarm_at: 5.0,
+        modbus: 'Slave 1 · AI2 · 4–20 mA',
+        location: 'после фильтра мехочистки (контроль засорения)',
+        loc_en: 'after mechanical filter (clogging detection)',
+    },
+    P3: {
+        name_ru: 'Давление после насоса 1-й ступени',
+        name_en: 'Pressure after stage-1 pump',
+        unit: 'bar', range: [0, 40],
+        warn_at: 32, alarm_at: 35,
+        modbus: 'Slave 1 · AI3 · 4–20 mA',
+        location: 'между насосом 1-й ст. (RO2) и мембраной 1-й ст.',
+        loc_en: 'between stage-1 pump (RO2) and membrane 1',
+    },
+    P4: {
+        name_ru: 'Давление после насоса 2-й ступени',
+        name_en: 'Pressure after stage-2 pump',
+        unit: 'bar', range: [0, 10],
+        warn_at: 7.5, alarm_at: 8.0,
+        modbus: 'Slave 1 · AI4 · 4–20 mA',
+        location: 'между насосом 2-й ст. (RO3) и мембраной 2-й ст.',
+        loc_en: 'between stage-2 pump (RO3) and membrane 2',
+    },
+    Q1: {
+        name_ru: 'Расход питательной воды',
+        name_en: 'Feed water flow',
+        unit: 'м³/ч', range: [0, 5],
+        modbus: 'Slave 2 (УРЖ2КМ) · канал 1',
+        location: 'на трубе после насоса преднагнетания',
+        loc_en: 'on pipe after pre-pump',
+    },
+    Q2: {
+        name_ru: 'Расход рецикла 1-й ступени',
+        name_en: 'Stage-1 recycle flow',
+        unit: 'м³/ч', range: [0, 3],
+        modbus: 'Slave 2 (УРЖ2КМ) · канал 2',
+        location: 'на трубе рецикла концентрата к насосу 1-й ст.',
+        loc_en: 'recycle pipe back to stage-1 pump',
+    },
+    Q3: {
+        name_ru: 'Расход товарного пермеата',
+        name_en: 'Product permeate flow',
+        unit: 'м³/ч', range: [0, 3],
+        warn_at: 0.8,  /* предупреждение если ниже */
+        modbus: 'Slave 2 (УРЖ2КМ) · канал 3',
+        location: 'на трубе пермеата 2-й ступени к чистой ёмкости',
+        loc_en: 'product permeate pipe to product tank',
+    },
+    Q4: {
+        name_ru: 'Расход рецикла 2-й ступени',
+        name_en: 'Stage-2 recycle flow',
+        unit: 'м³/ч', range: [0, 2],
+        modbus: 'Slave 2 (УРЖ2КМ) · канал 4',
+        location: 'на трубе рецикла концентрата к насосу 2-й ст.',
+        loc_en: 'recycle pipe back to stage-2 pump',
+    },
+    'σ2': {
+        name_ru: 'Проводимость пермеата 1-й ступени',
+        name_en: 'Stage-1 permeate conductivity',
+        unit: 'мкСм/см', range: [0, 200],
+        warn_at: 30, alarm_at: 50,
+        modbus: 'Slave 10 (СЛ21-201) · канал X2',
+        location: 'на трубе пермеата мембраны 1-й ст. вниз к промежуточной',
+        loc_en: 'permeate of stage-1 membrane down to buffer tank',
+    },
+    'σ3': {
+        name_ru: 'Проводимость товарного пермеата',
+        name_en: 'Product permeate conductivity',
+        unit: 'мкСм/см', range: [0, 50],
+        warn_at: 5, alarm_at: 10,
+        modbus: 'Slave 11 (СЛ21-101) · канал X1',
+        location: 'на трубе пермеата 2-й ст. перед чистой ёмкостью',
+        loc_en: 'permeate of stage-2 membrane before product tank',
+    },
+};
+
+function getCurrentValueForSensor(tag) {
+    /* Ищем sc-value внутри SVG sensor-circle для tag, чтобы взять
+     * актуальное значение (mock-data его постоянно обновляет). */
+    const groups = document.querySelectorAll('.mnemo-svg .sensor-group');
+    for (const g of groups) {
+        const tagEl = g.querySelector('.sc-tag');
+        if (tagEl && tagEl.textContent.trim() === tag) {
+            const v = g.querySelector('.sc-value');
+            return v ? parseFloat(v.textContent) : NaN;
+        }
+    }
+    return NaN;
+}
+
+function classifyValue(value, meta) {
+    if (isNaN(value)) return 'offline';
+    if (meta.alarm_at !== undefined && value >= meta.alarm_at) return 'danger';
+    if (meta.warn_at !== undefined && value >= meta.warn_at) return 'warn';
+    return 'ok';
+}
+
+function renderTrendSvg(min, max, count) {
+    /* Простая псевдо-кривая для прототипа: рендерим N точек от min до max с
+     * случайным шумом. На реальном устройстве это будет ring buffer 3ч. */
+    const W = 660, H = 80;
+    const pts = [];
+    for (let i = 0; i < count; i++) {
+        const t = i / (count - 1);
+        const baseline = min + (max - min) * (0.4 + 0.5 * Math.sin(t * Math.PI * 1.5));
+        const noise = (Math.random() - 0.5) * (max - min) * 0.05;
+        pts.push({ x: t * W, y: H - ((baseline + noise - min) / (max - min)) * H });
+    }
+    const path = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+    return `<svg width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${path}" stroke="var(--accent)" stroke-width="1.5" fill="none"/>
+        <path d="${path} L${W},${H} L0,${H} Z" fill="var(--accent-mute)" opacity="0.5"/>
+    </svg>`;
+}
+
+function showSensorDetail(tag) {
+    const meta = sensorMeta[tag];
+    if (!meta) return;
+    const lang = localStorage.getItem('hmi.lang') || 'ru';
+    const current = getCurrentValueForSensor(tag);
+    const state = classifyValue(current, meta);
+
+    const m = document.getElementById('sensor-modal');
+    if (!m) return;
+
+    const name = lang === 'ru' ? meta.name_ru : meta.name_en;
+    const loc = lang === 'ru' ? meta.location : meta.loc_en;
+    const stateLabel = { ok: 'Норма', warn: 'Предупреждение', danger: 'АВАРИЯ', offline: 'Нет данных' }[state];
+
+    /* Pointer position на range bar */
+    const [rmin, rmax] = meta.range;
+    const pointerPct = Math.max(0, Math.min(100, ((current - rmin) / (rmax - rmin)) * 100));
+
+    /* Уставки */
+    let setpointsHtml = `<div class="sm-prop-row"><span class="key">Норма</span><span class="val">< ${meta.warn_at ?? rmax} ${meta.unit}</span></div>`;
+    if (meta.warn_at) {
+        setpointsHtml += `<div class="sm-prop-row"><span class="key">Предупреждение</span><span class="val">${meta.warn_at}–${meta.alarm_at ?? rmax} ${meta.unit}</span></div>`;
+    }
+    if (meta.alarm_at) {
+        setpointsHtml += `<div class="sm-prop-row"><span class="key">АВАРИЯ</span><span class="val">> ${meta.alarm_at} ${meta.unit}</span></div>`;
+    }
+
+    /* Тренд stats — псевдо-данные для прототипа */
+    const trendMin = (current * 0.85).toFixed(1);
+    const trendMax = (current * 1.08).toFixed(1);
+    const trendAvg = (current * 0.96).toFixed(1);
+
+    m.querySelector('.sensor-modal').innerHTML = `
+        <div class="sm-header">
+            <div>
+                <div class="sm-title">${tag} — ${name}</div>
+                <div class="sm-subtitle">${loc}</div>
+            </div>
+            <button class="sm-close" data-modal="close">×</button>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Текущее значение</div>
+            <div class="sm-current ${state}">
+                <span class="sm-current-value">${isNaN(current) ? '—' : current.toFixed(1)}</span>
+                <span class="sm-current-unit">${meta.unit}</span>
+                <span class="badge badge-${state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'danger' ? 'danger' : 'mute'}" style="margin-left: auto;">${stateLabel}</span>
+            </div>
+            <div class="sm-range-bar">
+                <div class="pointer" style="left: ${pointerPct}%;"></div>
+            </div>
+            <div class="sm-range-labels">
+                <span>${rmin} ${meta.unit}</span>
+                <span>${rmax} ${meta.unit}</span>
+            </div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Тренд за 3 часа</div>
+            <div class="sm-trend">${renderTrendSvg(rmin, current * 1.1, 60)}</div>
+            <div class="sm-trend-stats">
+                <span>Мин: <span class="stat-value">${trendMin} ${meta.unit}</span></span>
+                <span>Среднее: <span class="stat-value">${trendAvg} ${meta.unit}</span></span>
+                <span>Макс: <span class="stat-value">${trendMax} ${meta.unit}</span></span>
+            </div>
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Уставки</div>
+            ${setpointsHtml}
+        </div>
+
+        <div class="sm-section">
+            <div class="sm-section-title">Источник</div>
+            <div class="sm-prop-row"><span class="key">Modbus</span><span class="val">${meta.modbus}</span></div>
+            <div class="sm-prop-row"><span class="key">Обновлено</span><span class="val">сейчас</span></div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn" data-modal="close">Закрыть</button>
+        </div>
+    `;
+
+    /* Open + close handlers */
+    m.classList.add('open');
+    m.querySelectorAll('[data-modal="close"]').forEach(btn => {
+        btn.addEventListener('click', () => m.classList.remove('open'), { once: true });
+    });
+}
+
 /* ───── boot ───── */
 document.addEventListener('DOMContentLoaded', () => {
     applyTheme(localStorage.getItem('hmi.theme') || 'light');
@@ -361,4 +581,22 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     });
+
+    // sensor circles → детальный модал
+    document.querySelectorAll('.mnemo-svg .sensor-group').forEach(g => {
+        g.addEventListener('click', () => {
+            const tagEl = g.querySelector('.sc-tag');
+            if (!tagEl) return;
+            const tag = tagEl.textContent.trim();
+            showSensorDetail(tag);
+        });
+    });
+
+    // backdrop click для sensor-modal
+    const sm = document.getElementById('sensor-modal');
+    if (sm) {
+        sm.addEventListener('click', e => {
+            if (e.target === sm) sm.classList.remove('open');
+        });
+    }
 });
