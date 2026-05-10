@@ -25,18 +25,19 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
 - [x] Скаффолд `feature/lvgl-ui` ветки
 - [ ] (этот документ)
 
-### Фаза 1 — каркас навигации
+### Фаза 1 — каркас навигации ✅
 - [x] `ui_statusbar.h/.c` — 44px полоса: время · сообщение · соединение ·
       кнопки theme/lang. Заменяет старый `alarm_bar` (40px).
 - [x] `ui_tabbar.h/.c` — 64px нижняя панель с 4 вкладками: Главная /
       Промывка / Настройки / Отладка (LV_SYMBOL_HOME/REFRESH/SETTINGS/LIST
       + локализованные лейблы). MVP = 4 экрана (см. UI_SPEC §1).
-- [ ] **Migration в `ui_main.c`:** заменить `ui_alarm_bar_*` →
-      `ui_statusbar_*`, `ui_nav_bar_*` → `ui_tabbar_*`, изменить
-      размеры контейнера контента (700→692), сократить screen_id_t до
-      4 экранов в tabbar (parameters/alarms прячем из tabbar или
-      переводим в под-страницы Главной). Текущий ui_main.c всё ещё
-      использует старые API — оба набора виджетов сейчас coexist.
+- [x] **Migration в `ui_main.c`:** ui_alarm_bar_* → ui_statusbar_*,
+      ui_nav_bar_* → ui_tabbar_*. TAB_TO_SCREEN маппинг (4 tab → 4 screen).
+      ui_theme.h legacy-макросы UI_SCREEN_WIDTH/UI_CONTENT_HEIGHT/etc.
+      превращены в алиасы на UI_*_W/H из ui_tokens.h — старые экраны
+      автоматически адаптируются к новому layout (700→692, 40→44, 60→64).
+- [ ] Удалить устаревшие `ui_alarm_bar_*` и `ui_nav_bar_*` из ui_common.c
+      (после того, как все экраны перейдут на новые токены).
 
 ### Фаза 2 — мнемосхема (главный экран)
 Контейнер: `lv_canvas` 900×530 (после crop viewBox 0 30 900 530), либо

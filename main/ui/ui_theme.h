@@ -9,6 +9,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include "ui_tokens.h"   /* источник истины для размеров и цветов */
 
 /* === Основная тёмная палитра === */
 #define COLOR_BG_DARK       lv_color_hex(0x1A1A2E)  // Тёмный фон экрана
@@ -41,11 +42,18 @@
 #define COLOR_PUMP_RUNNING   lv_color_hex(0x00FF88)  // Насос работает -- зелёный
 #define COLOR_PUMP_FAULT     lv_color_hex(0xFF0000)  // Неисправность насоса -- красный
 
-/* Размеры основных UI-областей (пиксели) */
-#define UI_ALARM_BAR_HEIGHT    40
-#define UI_NAV_BAR_HEIGHT      60
-#define UI_CONTENT_HEIGHT      700
-#define UI_SCREEN_WIDTH        1280
+/* Размеры основных UI-областей.
+ *
+ * Алиасы legacy-имён на актуальные UI_*_H/UI_SCREEN_W из ui_tokens.h.
+ * Старые экраны (scr_*) ссылаются на эти имена — после перехода на
+ * новый layout (statusbar 44px / tabbar 64px / content 692px) они
+ * автоматически адаптируются. Новый код использовать UI_STATUSBAR_H,
+ * UI_TABBAR_H, UI_CONTENT_H, UI_SCREEN_W напрямую.
+ */
+#define UI_ALARM_BAR_HEIGHT    UI_STATUSBAR_H   /* 44 (was 40) */
+#define UI_NAV_BAR_HEIGHT      UI_TABBAR_H      /* 64 (was 60) */
+#define UI_CONTENT_HEIGHT      UI_CONTENT_H     /* 692 (was 700) */
+#define UI_SCREEN_WIDTH        UI_SCREEN_W      /* 1280 */
 
 /**
  * Инициализация темы LVGL.
