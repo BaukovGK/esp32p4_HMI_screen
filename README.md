@@ -151,29 +151,53 @@ app_main()
 
 ## Сборка и прошивка
 
+**Рекомендуемый способ — через `build.sh`** (автоматически переключает target на esp32p4 при необходимости):
+
 ```bash
-idf.py set-target esp32p4
+./build.sh                # собрать
+./build.sh flash          # собрать и залить
+./build.sh flash monitor  # собрать, залить, открыть монитор
+./build.sh clean          # полная очистка build/, sdkconfig
+```
+
+Ручной способ (если ESP-IDF уже настроен под esp32p4):
+
+```bash
 idf.py build
 idf.py -p PORT flash monitor
 ```
 
+⚠️ **При первой сборке после клонирования или после смены ветки** — обязательно
+`./build.sh` (или `idf.py set-target esp32p4` вручную). Без этого ESP-IDF
+может использовать default target (esp32) и сборка упадёт на
+`fatal error: esp_lcd_mipi_dsi.h: No such file or directory` — DSI-источники
+в `esp_lcd` собираются только под `CONFIG_SOC_MIPI_DSI_SUPPORTED=y`,
+который активен только для esp32p4.
+
 Для выхода из монитора: `Ctrl-]`
 
-## Таблица разделов
+## Таблица разделов (OTA-ready, 16 МБ flash)
 
-| Раздел | Тип | Смещение | Размер |
-|--------|-----|----------|--------|
-| nvs | data/nvs | 0x9000 | 24 KB |
-| phy_init | data/phy | 0xF000 | 4 KB |
-| factory | app | 0x10000 | 3 MB |
-| coredump | data/coredump | 0x310000 | 64 KB |
+| Раздел | Тип | Смещение | Размер | Назначение |
+|--------|-----|----------|--------|---|
+| nvs | data/nvs | 0x9000 | 24 KB | системный NVS (network creds, OTA state) |
+| otadata | data/ota | 0xF000 | 8 KB | состояние OTA (текущий слот) |
+| phy_init | data/phy | 0x11000 | 4 KB | RF калибровка |
+| ota_0 | app | 0x20000 | 3 MB | приложение слот A |
+| ota_1 | app | 0x320000 | 3 MB | приложение слот B (rollback) |
+| nvs_storage | data/nvs | 0x620000 | 1 MB | пользовательские данные (уставки, alarm history) |
+| coredump | data/coredump | 0x720000 | 64 KB | core dump при crash |
 
-## Ключевые настройки (sdkconfig)
+Свободно для будущих расширений: ~9 МБ.
+
+## Ключевые настройки (sdkconfig.defaults)
 
 - PSRAM 200 MHz + XIP, L2 cache 256 KB / 128B line
 - FreeRTOS 1000 Hz, main task stack 10 KB
 - LVGL color depth 16-bit (RGB565), Montserrat 14
-- MQTT buffer 2048 bytes
-- Task WDT timeout 30s
+- MQTT buffer 4096 bytes (для diagnostic-payload без фрагментации)
+- Task WDT timeout 30s, LVGL task в WDT registered
+- Bootloader rollback enabled (для безопасного OTA)
 - Ethernet PHY RST = GPIO51 (Waveshare ESP32-P4-NANO)
 - I2C legacy conflict check disabled
+- Target = esp32p4 (закреплён в `CMakeLists.txt` через `set(IDF_TARGET)`)
