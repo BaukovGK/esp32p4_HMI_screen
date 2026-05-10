@@ -516,7 +516,6 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
                           const char *data, int data_len)
 {
     // Копирование топика в локальный буфер с нуль-терминатором
-    #define MQTT_TOPIC_BUF_SIZE 128
     char topic_buf[MQTT_TOPIC_BUF_SIZE];
     int len = (topic_len < (int)sizeof(topic_buf) - 1) ? topic_len : (int)sizeof(topic_buf) - 1;
     memcpy(topic_buf, topic, len);

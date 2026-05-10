@@ -15,6 +15,8 @@
  */
 #ifndef LVGL_LIVE_PREVIEW
 #include "plant_data.h"
+#include "plant_data_internal.h"
+#include "nvs_worker.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
@@ -443,7 +445,20 @@ static power_meter_data_t pump_get_copy(int idx)
 power_meter_data_t plant_data_get_power_lp(void) { return pump_get_copy(0); }
 power_meter_data_t plant_data_get_power_hp(void) { return pump_get_copy(1); }
 
-/* ---- Сохранение уставок в NVS (вызывается из UI-задачи после "Применить") ---- */
+/* ---- Сохранение уставок в NVS ---- */
+/*
+ * Архитектура (см. также nvs_worker.h, docs/CODE_REVIEW.md Top-11):
+ *   Публичные plant_data_save_settings_* НЕ блокируются на flash:
+ *     1) обновляют кэш в s_data (быстро, под мьютексом),
+ *     2) постят задачу в очередь nvs_worker.
+ *   nvs_worker (фоновая task с приоритетом IDLE+1) разбирает очередь и
+ *   вызывает *_blocking варианты — те читают свежие уставки из s_data
+ *   и выполняют синхронные nvs_set_blob/nvs_commit (10..100 мс).
+ *
+ *   Если воркер не запущен (вернул ESP_ERR_INVALID_STATE) — fallback на
+ *   синхронную запись в контексте вызывающей задачи: критично сохранить
+ *   настройки даже если фон не поднялся (например, до nvs_worker_init()).
+ */
 
 /**
  * Вспомогательная функция: записывает blob в NVS и делает commit.
@@ -453,11 +468,105 @@ static void nvs_save_blob(const char *key, const void *data, size_t len)
 {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_blob(nvs, key, data, len);
-        nvs_commit(nvs);
+        esp_err_t err = nvs_set_blob(nvs, key, data, len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "NVS: nvs_set_blob('%s') failed: %s", key, esp_err_to_name(err));
+        } else {
+            err = nvs_commit(nvs);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "NVS: nvs_commit('%s') failed: %s", key, esp_err_to_name(err));
+            }
+        }
         nvs_close(nvs);
     } else {
-        ESP_LOGE(TAG, "NVS: failed to open for writing");
+        ESP_LOGE(TAG, "NVS: failed to open for writing ('%s')", key);
+    }
+}
+
+/* ---- Внутренние *_blocking функции (вызываются из nvs_worker контекста). ----
+ * Каждая берёт snapshot нужного блока из s_data под мьютексом, потом пишет
+ * в NVS уже без мьютекса (flash-write не должен держать общий лок). */
+
+void plant_data_save_settings_pressure_blocking(void)
+{
+    settings_pressure_t snap;
+    if (plant_data_try_lock()) {
+        snap = s_data.set_pressure;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_pressure_blocking");
+        return; /* кэш недоступен — пропускаем итерацию, не падаем */
+    }
+    nvs_save_blob(NVS_KEY_PRESS, &snap, sizeof(snap));
+}
+
+void plant_data_save_settings_doser_blocking(void)
+{
+    settings_doser_t snap;
+    if (plant_data_try_lock()) {
+        snap = s_data.set_doser;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_doser_blocking");
+        return;
+    }
+    nvs_save_blob(NVS_KEY_DOSER, &snap, sizeof(snap));
+}
+
+void plant_data_save_settings_washing_blocking(void)
+{
+    settings_washing_t snap;
+    if (plant_data_try_lock()) {
+        snap = s_data.set_washing;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_washing_blocking");
+        return;
+    }
+    nvs_save_blob(NVS_KEY_WASH, &snap, sizeof(snap));
+}
+
+void plant_data_save_settings_timeouts_blocking(void)
+{
+    settings_timeouts_t snap;
+    if (plant_data_try_lock()) {
+        snap = s_data.set_timeouts;
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGW(TAG, "plant_data lock timeout in save_timeouts_blocking");
+        return;
+    }
+    nvs_save_blob(NVS_KEY_TMOUT, &snap, sizeof(snap));
+}
+
+/* ---- Публичные обёртки (вызываются из UI-task; неблокирующие). ---- */
+
+/**
+ * Обновить кэш set_<group> в s_data (под мьютексом) и поставить задачу воркеру.
+ * Если воркер не запущен — синхронный fallback (для предотвращения потери настроек).
+ */
+static void enqueue_or_fallback(nvs_task_type_t type, const char *label)
+{
+    esp_err_t err = nvs_worker_enqueue(type);
+    if (err == ESP_OK) {
+        return;
+    }
+    if (err == ESP_ERR_INVALID_STATE) {
+        /* Воркер не успел стартовать — пишем синхронно, иначе потеряем настройки. */
+        ESP_LOGW(TAG, "nvs_worker not running, falling back to sync save (%s)", label);
+        switch (type) {
+        case NVS_TASK_SAVE_PRESSURE: plant_data_save_settings_pressure_blocking(); break;
+        case NVS_TASK_SAVE_DOSER:    plant_data_save_settings_doser_blocking();    break;
+        case NVS_TASK_SAVE_WASHING:  plant_data_save_settings_washing_blocking();  break;
+        case NVS_TASK_SAVE_TIMEOUTS: plant_data_save_settings_timeouts_blocking(); break;
+        default: break;
+        }
+    } else {
+        /* ESP_ERR_TIMEOUT (queue full) или ESP_ERR_INVALID_ARG — лог + drop.
+         * Кэш в s_data уже обновлён, при следующем save'е этой же группы
+         * актуальные данные всё равно попадут в NVS. */
+        ESP_LOGW(TAG, "nvs_worker_enqueue(%s) failed: %s — save dropped",
+                 label, esp_err_to_name(err));
     }
 }
 
@@ -470,10 +579,9 @@ void plant_data_save_settings_pressure(const settings_pressure_t *s)
         xSemaphoreGive(s_mutex);
     } else {
         ESP_LOGW(TAG, "plant_data lock timeout in save_settings_pressure");
-        /* Кэш не обновлён, но запись в NVS всё равно делаем — следующий старт подхватит */
+        return; /* без обновления кэша смысла писать нечего — данные потеряны */
     }
-    nvs_save_blob(NVS_KEY_PRESS, s, sizeof(*s));
-    ESP_LOGI(TAG, "NVS: saved pressure settings");
+    enqueue_or_fallback(NVS_TASK_SAVE_PRESSURE, "pressure");
 }
 
 void plant_data_save_settings_doser(const settings_doser_t *s)
@@ -485,9 +593,9 @@ void plant_data_save_settings_doser(const settings_doser_t *s)
         xSemaphoreGive(s_mutex);
     } else {
         ESP_LOGW(TAG, "plant_data lock timeout in save_settings_doser");
+        return;
     }
-    nvs_save_blob(NVS_KEY_DOSER, s, sizeof(*s));
-    ESP_LOGI(TAG, "NVS: saved doser settings");
+    enqueue_or_fallback(NVS_TASK_SAVE_DOSER, "doser");
 }
 
 void plant_data_save_settings_washing(const settings_washing_t *s)
@@ -499,9 +607,9 @@ void plant_data_save_settings_washing(const settings_washing_t *s)
         xSemaphoreGive(s_mutex);
     } else {
         ESP_LOGW(TAG, "plant_data lock timeout in save_settings_washing");
+        return;
     }
-    nvs_save_blob(NVS_KEY_WASH, s, sizeof(*s));
-    ESP_LOGI(TAG, "NVS: saved washing settings");
+    enqueue_or_fallback(NVS_TASK_SAVE_WASHING, "washing");
 }
 
 void plant_data_save_settings_timeouts(const settings_timeouts_t *s)
@@ -513,8 +621,8 @@ void plant_data_save_settings_timeouts(const settings_timeouts_t *s)
         xSemaphoreGive(s_mutex);
     } else {
         ESP_LOGW(TAG, "plant_data lock timeout in save_settings_timeouts");
+        return;
     }
-    nvs_save_blob(NVS_KEY_TMOUT, s, sizeof(*s));
-    ESP_LOGI(TAG, "NVS: saved timeout settings");
+    enqueue_or_fallback(NVS_TASK_SAVE_TIMEOUTS, "timeouts");
 }
 #endif /* !LVGL_LIVE_PREVIEW */
