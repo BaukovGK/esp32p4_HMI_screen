@@ -12,7 +12,10 @@
 #include "lvgl.h"
 #include "ui_main.h"
 #include "ui_theme.h"
+#include "ui_tokens.h"
 #include "ui_common.h"
+#include "ui_statusbar.h"
+#include "ui_tabbar.h"
 #include "ui_fonts.h"
 #include "lang.h"
 #include "plant_data.h"
@@ -259,9 +262,33 @@ static const preview_screen_t s_screens[] = {
 
 static int       s_current_screen = 0;
 static lv_obj_t *s_content        = NULL;
-static lv_obj_t *s_alarm_bar      = NULL;
-static lv_obj_t *s_nav_bar        = NULL;
+static lv_obj_t *s_statusbar      = NULL;
+static lv_obj_t *s_tabbar         = NULL;
 static lv_obj_t *s_screen_obj     = NULL;
+
+/* Маппинг screen_id_t (6 экранов) → ui_tab_id_t (4 вкладки tabbar).
+ * Для экранов вне tabbar (PARAMETERS, ALARMS) возвращаем UI_TAB_COUNT. */
+static ui_tab_id_t screen_to_tab(int screen_id)
+{
+    switch (screen_id) {
+    case SCREEN_MNEMONIC:    return UI_TAB_MAIN;
+    case SCREEN_WASHING:     return UI_TAB_WASHING;
+    case SCREEN_SETTINGS:    return UI_TAB_SETTINGS;
+    case SCREEN_DIAGNOSTICS: return UI_TAB_DEBUG;
+    default:                 return UI_TAB_COUNT;
+    }
+}
+
+static int tab_to_screen(ui_tab_id_t tab)
+{
+    switch (tab) {
+    case UI_TAB_MAIN:     return SCREEN_MNEMONIC;
+    case UI_TAB_WASHING:  return SCREEN_WASHING;
+    case UI_TAB_SETTINGS: return SCREEN_SETTINGS;
+    case UI_TAB_DEBUG:    return SCREEN_DIAGNOSTICS;
+    default:              return SCREEN_MNEMONIC;
+    }
+}
 
 static void preview_switch_screen(int id)
 {
@@ -274,7 +301,11 @@ static void preview_switch_screen(int id)
 
     s_current_screen = id;
     s_screen_obj = s_screens[id].create(s_content);
-    ui_nav_bar_set_active(s_nav_bar, id);
+
+    ui_tab_id_t tab = screen_to_tab(id);
+    if (tab != UI_TAB_COUNT) {
+        ui_tabbar_set_active(s_tabbar, tab);
+    }
 
     /* Immediately fill with mock data */
     if (s_screens[id].update && s_screen_obj) {
@@ -282,15 +313,21 @@ static void preview_switch_screen(int id)
     }
 }
 
-static void on_nav_select(int screen_id)
+static void on_tab_select(ui_tab_id_t tab)
 {
-    preview_switch_screen(screen_id);
+    preview_switch_screen(tab_to_screen(tab));
+}
+
+static void on_theme_change(void)
+{
+    /* TODO: пересоздать UI после переключения темы. Пока no-op —
+     * новые цвета подхватятся при следующем lv_obj_invalidate. */
 }
 
 static void preview_refresh_cb(lv_timer_t *timer)
 {
     (void)timer;
-    ui_alarm_bar_update(s_alarm_bar, &s_preview_data);
+    ui_statusbar_update(s_statusbar, &s_preview_data);
     if (s_screens[s_current_screen].update && s_screen_obj) {
         s_screens[s_current_screen].update(s_screen_obj, &s_preview_data, ~0u);
     }
@@ -305,41 +342,43 @@ void lvgl_live_preview_init(void)
     /* Initialize subsystems */
     lang_init(LANG_RU);
     plant_data_init();
+    alarm_ring_init();
 
-    /* Theme & background */
+    /* Theme & background — используем новые токены (light по умолчанию). */
+    ui_tokens_set_theme(UI_THEME_LIGHT);
     ui_theme_init();
     lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, COLOR_BG_DARK, 0);
+    lv_obj_set_style_bg_color(scr, ui_token_bg_base(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Alarm bar (40px top strip) */
-    s_alarm_bar = ui_alarm_bar_create(scr);
+    /* Statusbar (44px top strip) — новый дизайн прототипа. */
+    s_statusbar = ui_statusbar_create(scr, on_theme_change);
 
-    /* Content area (UI_SCREEN_WIDTH x UI_CONTENT_HEIGHT) */
+    /* Content area (1280 × 692). */
     s_content = lv_obj_create(scr);
-    lv_obj_set_size(s_content, UI_SCREEN_WIDTH, UI_CONTENT_HEIGHT);
-    lv_obj_set_pos(s_content, 0, UI_ALARM_BAR_HEIGHT);
-    lv_obj_set_style_bg_color(s_content, COLOR_BG_DARK, 0);
+    lv_obj_set_size(s_content, UI_SCREEN_W, UI_CONTENT_H);
+    lv_obj_set_pos(s_content, 0, UI_STATUSBAR_H);
+    lv_obj_set_style_bg_color(s_content, ui_token_bg_base(), 0);
     lv_obj_set_style_bg_opa(s_content, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_content, 0, 0);
     lv_obj_set_style_border_width(s_content, 0, 0);
     lv_obj_set_style_pad_all(s_content, 0, 0);
     lv_obj_remove_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Navigation bar (60px bottom strip) */
-    s_nav_bar = ui_nav_bar_create(scr, on_nav_select);
+    /* Tabbar (64px bottom) — 4 вкладки MVP. */
+    s_tabbar = ui_tabbar_create(scr, on_tab_select);
 
-    /* Create initial screen (mnemonic / P&ID) */
+    /* Создание стартового экрана — мнемосхема. */
     s_current_screen = SCREEN_MNEMONIC;
     s_screen_obj = s_screens[SCREEN_MNEMONIC].create(s_content);
-    ui_nav_bar_set_active(s_nav_bar, SCREEN_MNEMONIC);
+    ui_tabbar_set_active(s_tabbar, UI_TAB_MAIN);
 
-    /* Fill with mock data */
-    ui_alarm_bar_update(s_alarm_bar, &s_preview_data);
+    /* Заполнить mock-данными сразу. */
+    ui_statusbar_update(s_statusbar, &s_preview_data);
     s_screens[SCREEN_MNEMONIC].update(s_screen_obj, &s_preview_data, ~0u);
 
-    /* Periodic refresh timer (250ms, same as real HMI) */
+    /* Periodic refresh (250 ms, как на реальном HMI). */
     lv_timer_create(preview_refresh_cb, 250, NULL);
 }
 

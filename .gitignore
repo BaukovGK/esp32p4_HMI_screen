@@ -7,8 +7,11 @@ sdkconfig.old
 # sdkconfig генерируется из sdkconfig.defaults через idf.py reconfigure
 # и должен игнорироваться — каждый разработчик генерирует его для своей платформы
 
-# IDE / editor
-.vscode/
+# IDE / editor — игнорируем целиком, кроме project-shared конфигов
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
 .idea/
 *.swp
 *~

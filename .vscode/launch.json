@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "sim: launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/sim/build/ro_hmi_sim",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "sim: build",
+            "presentation": {
+                "hidden": false,
+                "group": "sim",
+                "order": 1
+            }
+        }
+    ]
+}

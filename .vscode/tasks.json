@@ -1,0 +1,45 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "sim: configure",
+            "type": "shell",
+            "command": "cmake -S sim -B sim/build -DCMAKE_BUILD_TYPE=Debug",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "sim: build",
+            "type": "shell",
+            "command": "cmake --build sim/build -j",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": [ "$gcc" ],
+            "dependsOn": [ "sim: configure" ]
+        },
+        {
+            "label": "sim: clean",
+            "type": "shell",
+            "command": "rm -rf sim/build",
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "sim: run",
+            "type": "shell",
+            "command": "./sim/build/ro_hmi_sim",
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": [ "sim: build" ],
+            "problemMatcher": [],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "dedicated",
+                "showReuseMessage": false,
+                "clear": true
+            }
+        }
+    ]
+}
