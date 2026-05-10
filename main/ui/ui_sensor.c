@@ -132,9 +132,19 @@ static void sensor_ctx_free_cb(lv_event_t *e)
 {
     ui_sensor_ctx_t *ctx = lv_event_get_user_data(e);
     if (!ctx) return;
-    /* Удаляем "осиротевшие" tap и leader, которые не дочерние root'у. */
-    if (ctx->tap)    lv_obj_delete(ctx->tap);
-    if (ctx->leader) lv_obj_delete(ctx->leader);
+    /* НЕ удаляем tap/leader явно! Они — siblings root'а в общем parent'е.
+     * Когда parent (например mnemo canvas) удаляется, LVGL итерирует его
+     * children в обратном порядке и destructит каждого. Если sensor cb
+     * удалит tap/leader (тоже children parent'а) во время этой итерации,
+     * loop index'ы становятся stale → use-after-free и crash при клике
+     * на любую вкладку, инициирующую удаление мнемосхемы.
+     *
+     * В нашем коде sensor создаётся ТОЛЬКО внутри mnemo canvas и
+     * удаляется ТОЛЬКО вместе с canvas. Так что orphan tap/leader при
+     * deleting sensor отдельно — не возникает.
+     *
+     * Если в будущем потребуется удалять sensor отдельно — использовать
+     * lv_obj_delete_async для tap/leader (deferred). */
     lv_free(ctx);
 }
 
