@@ -22,3 +22,14 @@
  * @return Указатель на LVGL-дисплей (lv_display_t*), или NULL при ошибке
  */
 lv_display_t *display_init(void);
+
+/**
+ * Деинициализация дисплейной подсистемы.
+ *
+ * Освобождает все ресурсы, захваченные display_init(): канал LDO MIPI DSI PHY,
+ * шину DSI, panel I/O, panel handle и LVGL port. Подсветка (LEDC канал)
+ * не освобождается — она привязана к отдельному GPIO и безопасна в любом состоянии.
+ *
+ * Безопасно вызывать повторно и сразу после неудачного display_init().
+ */
+void display_deinit(void);

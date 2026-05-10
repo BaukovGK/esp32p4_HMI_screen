@@ -31,6 +31,15 @@
 
 static const char *TAG = "display";
 
+/* Хэндлы дисплейной подсистемы вынесены в module-static, чтобы при ошибке
+ * на любом шаге cleanup-метка могла корректно освободить уже захваченные ресурсы,
+ * а display_deinit() мог выполнить тот же teardown по запросу. */
+static esp_ldo_channel_handle_t s_ldo_mipi = NULL;
+static esp_lcd_dsi_bus_handle_t s_dsi_bus = NULL;
+static esp_lcd_panel_io_handle_t s_io = NULL;
+static esp_lcd_panel_handle_t s_panel = NULL;
+static bool s_lvgl_port_inited = false;
+
 /**
  * Инициализация ШИМ-подсветки дисплея через LEDC.
  */
@@ -81,31 +90,46 @@ static esp_err_t backlight_set(int brightness_percent)
 lv_display_t *display_init(void)
 {
     ESP_LOGI(TAG, "Initializing display");
+    esp_err_t err;
 
-    /* 1. Инициализация ШИМ-подсветки (подсветка пока выключена) */
-    ESP_ERROR_CHECK(backlight_init());
+    /* 1. Инициализация ШИМ-подсветки (подсветка пока выключена).
+     *    LEDC-операции редко падают, но проверяем — единый стиль обработки ошибок. */
+    err = backlight_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "backlight_init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
     /* 2. Включение питания PHY MIPI DSI через встроенный LDO ESP32-P4 */
 #if BOARD_MIPI_DSI_PHY_LDO_CHAN > 0
-    esp_ldo_channel_handle_t ldo_mipi = NULL;
     esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = BOARD_MIPI_DSI_PHY_LDO_CHAN,
         .voltage_mv = BOARD_MIPI_DSI_PHY_LDO_MV,
     };
-    ESP_ERROR_CHECK(esp_ldo_acquire_channel(&ldo_cfg, &ldo_mipi));
+    err = esp_ldo_acquire_channel(&ldo_cfg, &s_ldo_mipi);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ldo_acquire_channel failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
     ESP_LOGI(TAG, "MIPI DSI PHY powered on");
 #endif
 
     /* 3. Создание шины MIPI DSI (2 линии данных) */
-    esp_lcd_dsi_bus_handle_t dsi_bus = NULL;
     esp_lcd_dsi_bus_config_t bus_cfg = JD9365_PANEL_BUS_DSI_2CH_CONFIG();
-    ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_cfg, &dsi_bus));
+    err = esp_lcd_new_dsi_bus(&bus_cfg, &s_dsi_bus);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_dsi_bus failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
     ESP_LOGI(TAG, "MIPI DSI bus created");
 
     /* 4. Создание DBI panel I/O (командный интерфейс) */
-    esp_lcd_panel_io_handle_t io = NULL;
     esp_lcd_dbi_io_config_t dbi_cfg = JD9365_PANEL_IO_DBI_CONFIG();
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(dsi_bus, &dbi_cfg, &io));
+    err = esp_lcd_new_panel_io_dbi(s_dsi_bus, &dbi_cfg, &s_io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_panel_io_dbi failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
     /* 5. Настройка DPI-тайминга видеопотока (800x1280, 60 Гц, RGB565) */
     esp_lcd_dpi_panel_config_t dpi_cfg = JD9365_800_1280_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
@@ -118,7 +142,7 @@ lv_display_t *display_init(void)
             .use_mipi_interface = 1,
         },
         .mipi_config = {
-            .dsi_bus = dsi_bus,
+            .dsi_bus = s_dsi_bus,
             .dpi_config = &dpi_cfg,
             .lane_num = BOARD_LCD_MIPI_DSI_LANES,
         },
@@ -131,21 +155,41 @@ lv_display_t *display_init(void)
         .vendor_config = &vendor_cfg,
     };
 
-    esp_lcd_panel_handle_t panel = NULL;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_jd9365(io, &panel_cfg, &panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+    err = esp_lcd_new_panel_jd9365(s_io, &panel_cfg, &s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_new_panel_jd9365 failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    err = esp_lcd_panel_reset(s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_panel_reset failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    err = esp_lcd_panel_init(s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_panel_init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    err = esp_lcd_panel_disp_on_off(s_panel, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_lcd_panel_disp_on_off failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
     ESP_LOGI(TAG, "LCD panel initialized");
 
     /* 7. Инициализация LVGL-порта */
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
+    err = lvgl_port_init(&lvgl_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "lvgl_port_init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    s_lvgl_port_inited = true;
 
     /* 8. Регистрация дисплея в LVGL (буферы в SPIRAM + DMA) */
     const lvgl_port_display_cfg_t disp_cfg = {
-        .io_handle = io,
-        .panel_handle = panel,
+        .io_handle = s_io,
+        .panel_handle = s_panel,
         .control_handle = NULL,
         .buffer_size = BOARD_LCD_DRAW_BUFF_SIZE,
         .double_buffer = true,
@@ -190,22 +234,75 @@ lv_display_t *display_init(void)
     lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
     ESP_LOGI(TAG, "Display ready (landscape 1280x800, sw rotation 270)");
 
-    /* 10. Включение подсветки на 100% */
-    ESP_ERROR_CHECK(backlight_set(100));
-    ESP_LOGI(TAG, "Backlight on");
+    /* 10. Включение подсветки на 100%.
+     *     Если LEDC update вдруг упадёт — экран покажется чёрным, но это не повод
+     *     рушить всю инициализацию: дисплей уже работает. Логируем и продолжаем. */
+    err = backlight_set(100);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "backlight_set failed: %s (display will be dark)", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "Backlight on");
+    }
 
     return disp;
 
 cleanup:
-    if (panel) {
-        esp_lcd_panel_del(panel);
+    /* Освобождаем ресурсы в порядке, обратном захвату.
+     * Backlight (LEDC) намеренно не останавливаем — он на отдельном GPIO,
+     * не привязан к DSI и его «зависшее» состояние безопасно. */
+    if (s_lvgl_port_inited) {
+        lvgl_port_deinit();
+        s_lvgl_port_inited = false;
     }
-    if (io) {
-        esp_lcd_panel_io_del(io);
+    if (s_panel) {
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
     }
-    if (dsi_bus) {
-        esp_lcd_del_dsi_bus(dsi_bus);
+    if (s_io) {
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+    }
+    if (s_dsi_bus) {
+        esp_lcd_del_dsi_bus(s_dsi_bus);
+        s_dsi_bus = NULL;
+    }
+    if (s_ldo_mipi) {
+        esp_ldo_release_channel(s_ldo_mipi);
+        s_ldo_mipi = NULL;
     }
     return NULL;
+}
+
+/**
+ * Деинициализация дисплейной подсистемы.
+ *
+ * Освобождает все ресурсы, захваченные display_init() (LDO канал, DSI шину,
+ * panel I/O, panel handle, LVGL port). Backlight остаётся в текущем состоянии —
+ * LEDC канал не освобождается намеренно (отдельный GPIO, не связан с DSI).
+ *
+ * Безопасно вызывать повторно или после неудачного display_init().
+ */
+void display_deinit(void)
+{
+    if (s_lvgl_port_inited) {
+        lvgl_port_deinit();
+        s_lvgl_port_inited = false;
+    }
+    if (s_panel) {
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+    }
+    if (s_io) {
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+    }
+    if (s_dsi_bus) {
+        esp_lcd_del_dsi_bus(s_dsi_bus);
+        s_dsi_bus = NULL;
+    }
+    if (s_ldo_mipi) {
+        esp_ldo_release_channel(s_ldo_mipi);
+        s_ldo_mipi = NULL;
+    }
 }
 #endif /* !LVGL_LIVE_PREVIEW */

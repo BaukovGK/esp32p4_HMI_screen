@@ -224,6 +224,7 @@ typedef struct {
 
     /* --- Статус HMI-панели --- */
     bool    mqtt_connected;         // Соединение MQTT установлено
+    bool    controller_online;      // Контроллер онлайн (по топику ro_plant/availability)
     int64_t last_msg_time_us;       // Время последнего сообщения, мкс (esp_timer)
 
     /* --- Кэш уставок (копия с контроллера) --- */
@@ -253,7 +254,9 @@ typedef struct {
 #define DIRTY_DIAGNOSTICS   (1u << 8)   // Изменилась диагностика
 #define DIRTY_ALARMS        (1u << 9)   // Изменился журнал аварий
 #define DIRTY_POWER         (1u << 10)  // Изменились данные KWS-306L (LP / HP)
-#define DIRTY_ALL           (0x7FFu)    // Все флаги (биты 0..10)
+#define DIRTY_CONTROLLER    (1u << 11)  // Изменился флаг controller_online
+#define DIRTY_SETTINGS      (1u << 12)  // Изменились локально-кэшированные уставки
+#define DIRTY_ALL           (0x1FFFu)   // Все флаги (биты 0..12)
 
 /* DI — Цифровые входы (битовые маски) */
 #define DI_SOURCE_LOW    (1u << 0)   /* DI1: нижний уровень исходной ёмкости  */
@@ -364,6 +367,19 @@ void plant_data_set_diagnostics(const diagnostics_t *diag);
 
 /** Установить статус MQTT-соединения (для отображения на HMI) */
 void plant_data_set_mqtt_status(bool connected);
+
+/**
+ * Установить флаг controller_online (по топику ro_plant/availability).
+ * Не обновляет last_msg_time_us — это статус контроллера, а не данные от него.
+ */
+void plant_data_set_controller_online(bool online);
+
+/**
+ * Получить флаг controller_online (потокобезопасно, под мьютексом с таймаутом).
+ * @return true если контроллер последний раз публиковал "online";
+ *         false если "offline" или мьютекс не удалось захватить.
+ */
+bool plant_data_get_controller_online(void);
 
 /* ---- Удобные геттеры (потокобезопасные, копируют под мьютексом) ---- */
 

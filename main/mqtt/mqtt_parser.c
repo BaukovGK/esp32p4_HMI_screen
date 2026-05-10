@@ -167,10 +167,26 @@ static wash_sub_state_t parse_wash_sub(const char *s)
  *
  * JSON: {"state":"AUTO", "auto_sub":"RUNNING", "wash_sub":null, "fault_flags":0}
  * Обновляет состояние, подсостояния AUTO/WASHING и флаги неисправностей.
+ *
+ * ВАЖНО: если обязательное поле "state" отсутствует или не валидно — сообщение
+ * игнорируется целиком (без вызова setter), чтобы битый JSON не затирал
+ * корректное состояние установки. PLANT_STATE_UNKNOWN — это валидный сигнал
+ * "контроллер не знает своё состояние", а не "забудь всё".
  */
 static void parse_state(const cJSON *json)
 {
-    plant_state_t st = parse_state_enum(json_get_string(json, "state", NULL));
+    /* Сначала прочитать ВСЕ поля, потом валидировать, потом setter. */
+    const char *state_str = json_get_string(json, "state", NULL);
+    if (!state_str) {
+        ESP_LOGW(TAG, "parse_state: missing 'state' field, ignoring");
+        return;
+    }
+    plant_state_t st = parse_state_enum(state_str);
+    /* Если строка есть, но не парсится в один из 5 валидных state — тоже дроп. */
+    if (st == PLANT_STATE_UNKNOWN && strcmp(state_str, "UNKNOWN") != 0) {
+        ESP_LOGW(TAG, "parse_state: invalid state='%s', ignoring", state_str);
+        return;
+    }
     auto_sub_state_t asub = parse_auto_sub(json_get_string(json, "auto_sub", NULL));
     wash_sub_state_t wsub = parse_wash_sub(json_get_string(json, "wash_sub", NULL));
     uint32_t ff = (uint32_t)json_get_int(json, "fault_flags", 0);
@@ -461,15 +477,20 @@ static void parse_alarm(const cJSON *json)
     const char *code = json_get_string(json, "code", "UNKNOWN");
     strncpy(entry.code, code, sizeof(entry.code) - 1);
 
-    /* Добавление аварии в кольцевой буфер и установка dirty-флага.
-     * Порядок захвата мьютексов: plant_data -> alarm_ring (совпадает с UI-потоком). */
+    /*
+     * ВАЖНО: alarm_ring lock не вкладывается в plant_data lock (порядок мьютексов).
+     * Это два независимых мьютекса; вложенный захват любых двух из них —
+     * потенциальный deadlock, если другая задача в этот момент берёт их в
+     * обратном порядке. Поэтому сначала push в alarm_ring (со своим мьютексом),
+     * потом отдельно — установка dirty-флага в plant_data.
+     */
+    alarm_ring_push(&entry);
+
     if (plant_data_lock(10)) {
-        alarm_ring_push(&entry);
         plant_data_get_mutable()->dirty_flags |= DIRTY_ALARMS;
         plant_data_unlock();
     } else {
-        /* Fallback: если не удалось захватить мьютекс, всё равно добавляем аварию */
-        alarm_ring_push(&entry);
+        ESP_LOGW(TAG, "parse_alarm: plant_data lock timeout, UI may miss dirty bit");
     }
 }
 
@@ -504,11 +525,13 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
     /*
      * Availability контроллера — это plain-text ("online" / "offline"),
      * не JSON. Обрабатываем до cJSON_ParseWithLength, чтобы не получить
-     * ложную ошибку парсинга. На будущее (P-NEXT): отразить в plant_data
-     * отдельный флаг controller_online — пока этим занимается last_msg_time_us.
+     * ложную ошибку парсинга. Записываем флаг controller_online в plant_data,
+     * чтобы UI мог явно показывать статус (а не только по last_msg_time_us).
      */
     if (strcmp(topic_buf, MQTT_TOPIC_AVAILABILITY) == 0) {
         ESP_LOGI(TAG, "controller availability=%.*s", data_len, data);
+        bool online = (data_len >= 6 && strncmp(data, "online", 6) == 0);
+        plant_data_set_controller_online(online);
         return;
     }
 

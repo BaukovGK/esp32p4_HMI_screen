@@ -69,6 +69,11 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_LOST_IP) {
         ESP_LOGW(TAG, "Lost IP address");
         plant_data_set_mqtt_status(false);
+        // Сбросить бит ETH_GOT_IP_BIT при потере IP, чтобы eth_wait_for_ip()
+        // не вернул OK сразу при повторном коннекте с link down
+        if (s_eth_event_group) {
+            xEventGroupClearBits(s_eth_event_group, ETH_GOT_IP_BIT);
+        }
     }
 }
 

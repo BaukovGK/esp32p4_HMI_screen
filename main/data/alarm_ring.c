@@ -23,7 +23,10 @@
 #include "alarm_ring.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "esp_log.h"
 #include <string.h>
+
+static const char *TAG = "alarm_ring";
 
 // Кольцевой буфер записей аварий (статический массив фиксированного размера)
 static alarm_entry_t s_ring[ALARM_RING_SIZE];
@@ -39,6 +42,17 @@ static SemaphoreHandle_t s_mutex = NULL;
 
 // Монотонный счётчик изменений (инкрементируется при каждом push)
 static uint32_t s_generation = 0;
+
+/* Счётчик операций, дропнутых из-за таймаута мьютекса (для диагностики). */
+static uint32_t s_dropped_alarms = 0;
+
+/* Стандартный таймаут захвата мьютекса. portMAX_DELAY запрещён вне HAL. */
+#define ALARM_RING_LOCK_MS 50
+
+static inline bool alarm_ring_try_lock(void)
+{
+    return xSemaphoreTake(s_mutex, pdMS_TO_TICKS(ALARM_RING_LOCK_MS)) == pdTRUE;
+}
 
 /**
  * Инициализация кольцевого буфера.
@@ -56,7 +70,11 @@ void alarm_ring_init(void)
 
 void alarm_ring_clear(void)
 {
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in clear (dropped)");
+        s_dropped_alarms++;
+        return;
+    }
     memset(s_ring, 0, sizeof(s_ring));
     s_head = 0;
     s_count = 0;
@@ -79,7 +97,11 @@ void alarm_ring_push(const alarm_entry_t *entry)
 {
     if (!entry) return;
 
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in push (dropped %s)", entry->code);
+        s_dropped_alarms++;
+        return;
+    }
 
     // Если пришла деактивация — найти и снять активную аварию с таким же кодом
     if (!entry->active) {
@@ -115,7 +137,12 @@ void alarm_ring_push(const alarm_entry_t *entry)
 int alarm_ring_get_active(alarm_entry_t *out, int max_count)
 {
     int found = 0;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!out || max_count <= 0) return 0;
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in get_active (dropped)");
+        s_dropped_alarms++;
+        return 0;
+    }
     for (int i = 0; i < s_count && i < ALARM_RING_SIZE && found < max_count; i++) {
         // Индекс: от новейшей записи к старейшей
         int idx = (s_head - 1 - i + ALARM_RING_SIZE) % ALARM_RING_SIZE;
@@ -137,7 +164,12 @@ int alarm_ring_get_active(alarm_entry_t *out, int max_count)
 int alarm_ring_get_history(alarm_entry_t *out, int max_count)
 {
     int copied = 0;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!out || max_count <= 0) return 0;
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in get_history (dropped)");
+        s_dropped_alarms++;
+        return 0;
+    }
     for (int i = 0; i < s_count && i < ALARM_RING_SIZE && copied < max_count; i++) {
         // Индекс: от новейшей записи к старейшей
         int idx = (s_head - 1 - i + ALARM_RING_SIZE) % ALARM_RING_SIZE;
@@ -155,7 +187,11 @@ int alarm_ring_get_history(alarm_entry_t *out, int max_count)
 int alarm_ring_active_count(void)
 {
     int count = 0;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in active_count (dropped)");
+        s_dropped_alarms++;
+        return 0;
+    }
     for (int i = 0; i < s_count && i < ALARM_RING_SIZE; i++) {
         int idx = (s_head - 1 - i + ALARM_RING_SIZE) % ALARM_RING_SIZE;
         if (s_ring[idx].active) count++;
@@ -174,7 +210,11 @@ int alarm_ring_active_count(void)
 alarm_category_t alarm_ring_worst_active(void)
 {
     alarm_category_t worst = ALARM_CAT_INFO; // по умолчанию — нет аварий
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in worst_active (dropped)");
+        s_dropped_alarms++;
+        return worst; // безопасный fallback: считаем что аварий нет
+    }
     for (int i = 0; i < s_count && i < ALARM_RING_SIZE; i++) {
         int idx = (s_head - 1 - i + ALARM_RING_SIZE) % ALARM_RING_SIZE;
         if (s_ring[idx].active && s_ring[idx].cat > worst) {
@@ -191,10 +231,23 @@ alarm_category_t alarm_ring_worst_active(void)
  */
 uint32_t alarm_ring_generation(void)
 {
-    uint32_t gen;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    uint32_t gen = 0;
+    if (!alarm_ring_try_lock()) {
+        ESP_LOGW(TAG, "alarm_ring lock timeout in generation (dropped)");
+        s_dropped_alarms++;
+        return 0; // 0 = "не знаю"; UI перерисует виджеты на следующем тике
+    }
     gen = s_generation;
     xSemaphoreGive(s_mutex);
     return gen;
+}
+
+/**
+ * Геттер счётчика дропов. Доступ — атомарное чтение uint32_t,
+ * без захвата мьютекса (счётчик растёт монотонно, точная синхронизация не нужна).
+ */
+uint32_t alarm_ring_get_dropped_count(void)
+{
+    return s_dropped_alarms;
 }
 #endif /* !LVGL_LIVE_PREVIEW */
