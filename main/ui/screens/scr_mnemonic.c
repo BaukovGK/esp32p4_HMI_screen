@@ -339,19 +339,32 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Контейнер для мнемо — в left area (924 px wide), центрирован.
-     * Right panel (KPI + Control) занимает 320 px справа. */
-    int canvas_x = PAGE_PAD + (LEFT_AREA_W - MNEMO_PX_W) / 2;
-    int canvas_y = PAGE_PAD + (LEFT_AREA_H - MNEMO_PX_H) / 2;
+    /* Внешний card занимает всю left area (как .mnemo-panel в proto).
+     * Внутри — wrapper-canvas 900×530, top-center aligned. SVG-аспект
+     * не позволяет мнемо заполнить высь, поэтому пустое место остаётся
+     * ВНИЗУ внутри card'а (как и в прототипе: preserveAspectRatio
+     * "xMidYMin meet" anchors content to top). */
+    lv_obj_t *mnemo_card = lv_obj_create(root);
+    lv_obj_set_pos(mnemo_card, PAGE_PAD, PAGE_PAD);
+    lv_obj_set_size(mnemo_card, LEFT_AREA_W, LEFT_AREA_H);
+    lv_obj_set_style_bg_color(mnemo_card, ui_token_bg_card(), 0);
+    lv_obj_set_style_bg_opa(mnemo_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(mnemo_card, ui_token_border(), 0);
+    lv_obj_set_style_border_width(mnemo_card, 1, 0);
+    lv_obj_set_style_radius(mnemo_card, UI_RADIUS_LG, 0);
+    lv_obj_set_style_pad_all(mnemo_card, 0, 0);
+    lv_obj_remove_flag(mnemo_card, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *canvas = lv_obj_create(root);
+    /* Inner wrapper для мнемо-контента — точно 900×530, top-center
+     * внутри card'а. Все widgets ниже (pipes, tanks, pumps, sensors)
+     * используют его как parent и работают в локальных координатах
+     * через SX/SY (которые 1:1 mapping для текущего MNEMO_SCALE=1.0). */
+    lv_obj_t *canvas = lv_obj_create(mnemo_card);
     lv_obj_set_size(canvas, MNEMO_PX_W, MNEMO_PX_H);
-    lv_obj_set_pos(canvas, canvas_x, canvas_y);
-    lv_obj_set_style_bg_color(canvas, ui_token_bg_card(), 0);
-    lv_obj_set_style_bg_opa(canvas, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(canvas, ui_token_border(), 0);
-    lv_obj_set_style_border_width(canvas, 1, 0);
-    lv_obj_set_style_radius(canvas, UI_RADIUS_LG, 0);
+    lv_obj_align(canvas, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_opa(canvas, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(canvas, 0, 0);
+    lv_obj_set_style_radius(canvas, 0, 0);
     lv_obj_set_style_pad_all(canvas, 0, 0);
     lv_obj_remove_flag(canvas, LV_OBJ_FLAG_SCROLLABLE);
 
