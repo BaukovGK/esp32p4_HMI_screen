@@ -11,6 +11,7 @@ set(MAIN_SRCS
     "mqtt/mqtt_parser.c"
     "ui/ui_main.c"
     "ui/ui_theme.c"
+    "ui/ui_tokens.c"
     "ui/ui_common.c"
     "ui/ui_events.c"
     "ui/screens/scr_mnemonic.c"
