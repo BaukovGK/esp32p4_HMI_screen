@@ -20,6 +20,8 @@ set(MAIN_SRCS
     "ui/ui_membrane.c"
     "ui/ui_sensor.c"
     "ui/ui_pipe.c"
+    "ui/ui_modal.c"
+    "ui/ui_sensor_modal.c"
     "ui/ui_common.c"
     "ui/ui_events.c"
     "ui/screens/scr_mnemonic.c"

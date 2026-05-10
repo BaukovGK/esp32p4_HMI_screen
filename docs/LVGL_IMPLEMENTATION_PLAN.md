@@ -82,12 +82,23 @@ ESP32-P4-NANO. Ветка работ: `feature/lvgl-ui`.
       pump states по data->pressure/flow/conductivity/di.
 
 ### Фаза 3 — модалы
-- [ ] `ui_modal.h/.c` — generic overlay с close-button, backdrop click.
-- [ ] `ui_sensor_modal_show(tag)` — порт showSensorDetail (range bar,
-      trend, setpoints, source). `sensorMeta` → C-структура.
+- [x] `ui_modal.h/.c` — generic overlay: backdrop (60% черный, click-close)
+      + card (560×640 max, rounded, shadow) + header (title/subtitle/×) +
+      body (flex column scrollable) + footer (Закрыть). Helper'ы:
+      ui_modal_add_section / add_prop_row / add_current_value (big value
+      + state badge) / add_range_bar (10-pct позиция).
+- [x] `ui_sensor_modal_show(tag, value)` — порт showSensorDetail.
+      sensor_meta_t static таблица (10 датчиков: P1..P4, Q1..Q4, σ2, σ3)
+      с порогами warn/alarm, единицами, modbus-source. Tolerant lookup:
+      UTF-8 "σ2" → fallback "S2" в коде ищется как tag_alt.
+      Секции: ТЕКУЩЕЕ ЗНАЧЕНИЕ (value+badge+range bar), УСТАВКИ
+      (норма/warn/alarm), ИСТОЧНИК (Modbus/Обновлено).
+- [x] ui_sensor click callback: ui_sensor_set_click_cb(sensor, cb).
+      Внутри LVGL EVENT_CLICKED hook'ается; cb получает (tag, value).
+      В scr_mnemonic зарегистрирован общий on_sensor_click для всех 10.
 - [ ] `ui_equipment_modal_show(equipment_id)` — порт showEquipmentDetail
       (filter ΔP+runtime / pump state+hours / membrane wash+lifetime).
-      `equipmentMeta` → C-структура.
+      `equipmentMeta` → C-структура. Следующий коммит.
 
 ### Фаза 4 — Промывка
 - [ ] Заменить `scr_washing.c` на новый layout: compact phase-track +

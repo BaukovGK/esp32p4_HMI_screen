@@ -28,6 +28,7 @@
 #include "ui_membrane.h"
 #include "ui_sensor.h"
 #include "ui_pipe.h"
+#include "ui_sensor_modal.h"
 #include "lang.h"
 #include <math.h>
 #include <stdio.h>
@@ -89,6 +90,13 @@ static ui_level_sw_state_t di_to_sw_state(uint8_t di, uint8_t bit_mask)
 static ui_pump_state_t di_to_pump_state(uint8_t di, uint8_t bit_mask)
 {
     return (di & bit_mask) ? UI_PUMP_RUNNING : UI_PUMP_OFF;
+}
+
+/* Общий callback: клик на любой sensor circle → открыть детальный модал.
+ * Tag и текущее значение приходят из ui_sensor (parsed из value_label). */
+static void on_sensor_click(const char *tag, float value)
+{
+    ui_sensor_modal_show(tag, value);
 }
 
 /* ─── собрать мнемосхему по координатам прототипа ─────────────────── */
@@ -351,6 +359,19 @@ lv_obj_t *scr_mnemonic_create(lv_obj_t *parent)
         .tag = "Q4", .value = "0.5", .state = UI_SENSOR_OK,
     };
     w->s_q4 = ui_sensor_create(canvas, &sc);
+
+    /* Регистрация click-handler на каждый sensor circle — открывает
+     * подробный модал по клику. Tag и значение читаются из ui_sensor. */
+    ui_sensor_set_click_cb(w->s_p1, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_p2, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_p3, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_p4, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_q1, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_q2, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_q3, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_q4, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_sigma2, on_sensor_click);
+    ui_sensor_set_click_cb(w->s_sigma3, on_sensor_click);
 
     return root;
 }

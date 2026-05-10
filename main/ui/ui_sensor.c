@@ -17,21 +17,25 @@
  */
 #include "ui_sensor.h"
 #include "ui_fonts.h"
+#include <stdlib.h>   /* strtof */
+#include <math.h>
 
 #define SENSOR_R     22
 #define SENSOR_DIAM  (SENSOR_R * 2)
 #define TAP_R        4
 
 typedef struct {
-    lv_obj_t          *root;
-    lv_obj_t          *frame;
-    lv_obj_t          *divider;
-    lv_obj_t          *tag_label;
-    lv_obj_t          *value_label;
-    lv_obj_t          *tap;
-    lv_obj_t          *leader;
-    lv_point_precise_t leader_points[2];   /* для lv_line */
-    ui_sensor_state_t  state;
+    lv_obj_t            *root;
+    lv_obj_t            *frame;
+    lv_obj_t            *divider;
+    lv_obj_t            *tag_label;
+    lv_obj_t            *value_label;
+    lv_obj_t            *tap;
+    lv_obj_t            *leader;
+    lv_point_precise_t   leader_points[2];   /* для lv_line */
+    ui_sensor_state_t    state;
+    const char          *tag;                /* указатель на string literal */
+    ui_sensor_click_cb_t click_cb;
 } ui_sensor_ctx_t;
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
@@ -182,12 +186,56 @@ lv_obj_t *ui_sensor_create(lv_obj_t *parent, const ui_sensor_config_t *cfg)
     lv_obj_align(val, LV_ALIGN_BOTTOM_MID, 0, -4);
     ctx->value_label = val;
 
+    /* Запомнить tag для click handler. cfg->tag должен жить дольше виджета
+     * (обычно string literal — это так). */
+    ctx->tag = cfg->tag;
+
     /* Привязать ctx к root + cleanup callback. */
     lv_obj_set_user_data(root, ctx);
     lv_obj_add_event_cb(root, sensor_ctx_free_cb, LV_EVENT_DELETE, ctx);
 
+    /* По умолчанию root кликабелен (lv_obj_create задаёт CLICKABLE).
+     * Click handler регистрируется отдельным API ui_sensor_set_click_cb. */
+
     apply_state(ctx, cfg->state);
     return root;
+}
+
+/* Внутренний event handler. Читает текущее значение из value_label
+ * (parsing first non-whitespace char). */
+static void sensor_click_event_cb(lv_event_t *e)
+{
+    lv_obj_t *sensor = lv_event_get_current_target(e);
+    if (!sensor) return;
+    ui_sensor_ctx_t *ctx = lv_obj_get_user_data(sensor);
+    if (!ctx || !ctx->click_cb) return;
+
+    float value = NAN;
+    if (ctx->value_label) {
+        const char *txt = lv_label_get_text(ctx->value_label);
+        if (txt && txt[0]) {
+            char c = txt[0];
+            bool numeric = (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.';
+            if (numeric) {
+                char *end = NULL;
+                float v = strtof(txt, &end);
+                if (end != txt) value = v;
+            }
+        }
+    }
+
+    ctx->click_cb(ctx->tag, value);
+}
+
+void ui_sensor_set_click_cb(lv_obj_t *sensor, ui_sensor_click_cb_t cb)
+{
+    if (!sensor) return;
+    ui_sensor_ctx_t *ctx = lv_obj_get_user_data(sensor);
+    if (!ctx) return;
+    ctx->click_cb = cb;
+    if (cb) {
+        lv_obj_add_event_cb(sensor, sensor_click_event_cb, LV_EVENT_CLICKED, NULL);
+    }
 }
 
 void ui_sensor_set_value(lv_obj_t *sensor, const char *value)

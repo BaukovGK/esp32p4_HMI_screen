@@ -60,6 +60,26 @@ void ui_sensor_set_value(lv_obj_t *sensor, const char *value);
 /** Обновить состояние (цвет всего sensor-group). */
 void ui_sensor_set_state(lv_obj_t *sensor, ui_sensor_state_t state);
 
+/**
+ * Callback при клике на sensor circle. Получает tag датчика
+ * (тот же что передавали в config — указатель должен жить).
+ */
+typedef void (*ui_sensor_click_cb_t)(const char *tag, float current_value);
+
+/**
+ * Зарегистрировать обработчик клика для этого sensor'а.
+ * Внутри LVGL уже стоит event_cb на LV_EVENT_CLICKED, вызывающий cb.
+ *
+ * @param sensor  Объект, возвращённый ui_sensor_create.
+ * @param cb      Функция-обработчик. NULL → отключить.
+ * @param current_value  Передаётся в cb при клике. Обычно текущее значение
+ *                       (для модала). Если хотите менять — храните как
+ *                       поле и обновляйте через ui_sensor_set_value.
+ *                       Здесь — снимок на момент регистрации.
+ *                       (TODO: динамика — храним ссылку на источник.)
+ */
+void ui_sensor_set_click_cb(lv_obj_t *sensor, ui_sensor_click_cb_t cb);
+
 #ifdef __cplusplus
 }
 #endif
