@@ -15,6 +15,7 @@
 #include "plant_data.h"
 #include "mqtt_client.h"  /* ESP-IDF MQTT client API */
 #include "esp_log.h"
+#include "esp_mac.h"       /* для esp_read_mac */
 #include "sdkconfig.h"
 #include <string.h>
 #include <stdio.h>
@@ -55,12 +56,54 @@ static int      s_frag_total     = 0;        /* ожидаемый total_data_le
 static bool     s_frag_active    = false;    /* идёт сборка многочастного сообщения */
 static uint32_t s_dropped_fragments = 0;     /* статистика: сколько пакетов отброшено из-за переполнения */
 
+/* ---- Счётчики неизвестных топиков и ошибок разбора (M8) ---- */
+static uint32_t s_total_messages = 0;        /* всего сообщений DATA получено */
+static uint32_t s_unknown_topic_count = 0;   /* неизвестные топики / parse errors */
+
 static void mqtt_frag_reset(void)
 {
     s_frag_active    = false;
     s_frag_offset    = 0;
     s_frag_total     = 0;
     s_frag_topic_len = 0;
+}
+
+/**
+ * Обёртка над mqtt_handle_incoming с подсчётом неизвестных топиков.
+ * Проверяет, известен ли топик перед вызовом парсера.
+ */
+static void mqtt_handle_incoming_with_stats(const char *topic, int topic_len,
+                                            const char *data, int data_len)
+{
+    /* Скопировать топик для сравнения (как делает парсер) */
+    char topic_buf[MQTT_TOPIC_BUF_SIZE];
+    int len = (topic_len < (int)sizeof(topic_buf) - 1) ? topic_len : (int)sizeof(topic_buf) - 1;
+    memcpy(topic_buf, topic, len);
+    topic_buf[len] = '\0';
+
+    /* Проверить известен ли топик */
+    bool topic_known = (
+        strcmp(topic_buf, MQTT_TOPIC_STATE) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_IO) == 0 ||
+        strncmp(topic_buf, MQTT_TOPIC_ANALOG_PREFIX, strlen(MQTT_TOPIC_ANALOG_PREFIX)) == 0 ||
+        strncmp(topic_buf, MQTT_TOPIC_FLOW_PREFIX, strlen(MQTT_TOPIC_FLOW_PREFIX)) == 0 ||
+        strncmp(topic_buf, MQTT_TOPIC_COND_PREFIX, strlen(MQTT_TOPIC_COND_PREFIX)) == 0 ||
+        strncmp(topic_buf, MQTT_TOPIC_POWER_PREFIX, strlen(MQTT_TOPIC_POWER_PREFIX)) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_TELEMETRY) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_DOSER) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_INTERLOCKS) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_DIAGNOSTICS) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_ALARMS) == 0 ||
+        strcmp(topic_buf, MQTT_TOPIC_AVAILABILITY) == 0
+    );
+
+    if (!topic_known) {
+        s_unknown_topic_count++;
+        ESP_LOGW(TAG, "Unknown topic: %s (count=%lu)", topic_buf, s_unknown_topic_count);
+    }
+
+    /* Передать в парсер */
+    mqtt_handle_incoming(topic, topic_len, data, data_len);
 }
 
 /**
@@ -139,8 +182,13 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
 
         if (fits_in_one) {
             /* Быстрый путь: сообщение поместилось в один пакет — без буферизации. */
-            mqtt_handle_incoming(event->topic, event->topic_len,
-                                 event->data, event->data_len);
+            s_total_messages++;
+            mqtt_handle_incoming_with_stats(event->topic, event->topic_len,
+                                           event->data, event->data_len);
+            if (s_total_messages % 100 == 0) {
+                ESP_LOGI(TAG, "MQTT stats: total=%lu, unknown=%lu",
+                         s_total_messages, s_unknown_topic_count);
+            }
             break;
         }
 
@@ -190,8 +238,13 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
 
         /* Полное сообщение собрано — отдать наверх и сбросить состояние. */
         if (s_frag_active && s_frag_offset == s_frag_total) {
-            mqtt_handle_incoming(s_frag_topic, s_frag_topic_len,
-                                 s_frag_buf, s_frag_offset);
+            s_total_messages++;
+            mqtt_handle_incoming_with_stats(s_frag_topic, s_frag_topic_len,
+                                           s_frag_buf, s_frag_offset);
+            if (s_total_messages % 100 == 0) {
+                ESP_LOGI(TAG, "MQTT stats: total=%lu, unknown=%lu",
+                         s_total_messages, s_unknown_topic_count);
+            }
             mqtt_frag_reset();
         }
         break;
@@ -225,9 +278,24 @@ static void mqtt_event_handler(void *arg, esp_event_base_t base,
  */
 esp_err_t mqtt_client_start(void)
 {
+    /* Построить уникальный client_id на основе MAC (M_c4) */
+    uint8_t mac[6];
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_BASE);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MAC address");
+        return ret;
+    }
+
+    /* Создать client_id = "ro_hmi_XXYYZZ" где XX:YY:ZZ — последние 3 байта MAC */
+    static char s_client_id[32];
+    snprintf(s_client_id, sizeof(s_client_id), "ro_hmi_%02x%02x%02x",
+             mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "MQTT client_id=%s (from MAC %02x:%02x:%02x:%02x:%02x:%02x)",
+             s_client_id, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
     const esp_mqtt_client_config_t cfg = {
         .broker.address.uri = CONFIG_MQTT_BROKER_URI,
-        .credentials.client_id = CONFIG_MQTT_CLIENT_ID,
+        .credentials.client_id = s_client_id,
         .session.last_will = {
             .topic = MQTT_TOPIC_HMI_AVAILABILITY,  // Топик Last Will Testament
             .msg = "offline",                  // Сообщение при потере связи
@@ -444,4 +512,24 @@ esp_err_t mqtt_publish_settings_timeouts(const settings_timeouts_t *s)
     int ret = esp_mqtt_client_publish(s_client, MQTT_TOPIC_SET_TIMEOUTS, buf, 0, 1, 0);
     return (ret >= 0) ? ESP_OK : ESP_FAIL;
 }
+
+/* ---- Публичные функции статистики (M8) ---- */
+
+/**
+ * Получить количество неизвестных топиков.
+ * Безопасно для чтения из других потоков (uint32 на 32-bit ESP атомарно).
+ */
+uint32_t mqtt_app_get_unknown_topic_count(void)
+{
+    return s_unknown_topic_count;
+}
+
+/**
+ * Получить общее количество обработанных MQTT-сообщений.
+ */
+uint32_t mqtt_app_get_message_count(void)
+{
+    return s_total_messages;
+}
+
 #endif /* !LVGL_LIVE_PREVIEW */

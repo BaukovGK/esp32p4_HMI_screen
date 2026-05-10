@@ -54,6 +54,12 @@ static inline bool plant_data_try_lock(void)
 #define NVS_KEY_WASH    "set_wash"
 #define NVS_KEY_TMOUT   "set_tmout"
 
+/* Гарантия соответствия размеров массивов Modbus-устройств в diagnostics_t константе */
+_Static_assert(sizeof(((diagnostics_t *)NULL)->modbus_errors) / sizeof(uint32_t) == DIAG_MAX_MB_DEVICES,
+               "modbus_errors array size must match DIAG_MAX_MB_DEVICES");
+_Static_assert(sizeof(((diagnostics_t *)NULL)->modbus_online) / sizeof(bool) == DIAG_MAX_MB_DEVICES,
+               "modbus_online array size must match DIAG_MAX_MB_DEVICES");
+
 /**
  * Загрузка уставок из NVS. Если ключ отсутствует — значение остаётся по умолчанию.
  * Вызывается из plant_data_init() после заполнения значений по умолчанию.

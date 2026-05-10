@@ -65,6 +65,7 @@ typedef int gpio_num_t;
 #define BOARD_LCD_LEDC_CH        0
 #define BOARD_LCD_LEDC_FREQ_HZ   20000
 #define BOARD_LCD_LEDC_DUTY_BITS LEDC_TIMER_10_BIT
+#define BOARD_LCD_LEDC_MAX_DUTY  ((1U << BOARD_LCD_LEDC_DUTY_BITS) - 1) // 10-bit: 1023
 
 /* ---- Буфер отрисовки LVGL ----
  *

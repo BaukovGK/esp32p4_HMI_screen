@@ -277,9 +277,18 @@ main/
 - Sprint 3 final commit: H1 (SUBSCRIBE_FAILED + ACL-deny detection), H2 (MQTT fragments assembly до 8К), H6 (json_get_u32 для uint32 cJSON), H8 (reconnect attempts counter), H_b (i2c pullup → external), H_d (DSI cache coherency комментарий), H_d2 (draw-buffer + _Static_assert), H_b4 (partitions OTA-ready 16MB), M_c1 (WDT регистрация LVGL + heap baseline log)
 - 📦 Структурное предложение (board → `components/bsp_waveshare_p4_nano/`) — backlog
 
-### Backlog (когда переделается UI)
-- Все MEDIUM/LOW
-- TLS + auth для MQTT (M7) — при выходе за trusted LAN
+### ✅ Спринт 4 (полировка MEDIUM) — DONE 2026-05-10 (commit 42090f2)
+- Block A (mqtt_app): M_c4 (MAC-based client_id), M8 (unknown topic counter)
+- Block B (mqtt_parser, plant_data): M3 (parse_state sanity), M4 (bomb-payload защита), M5 (DIAG_MAX_MB_DEVICES=6 — было обрезано до 4!), M6 (snprintf), M2 — НЕ удалён (last_msg_time_us используется в ui_main.c для stale-detection)
+- Block C (board): M_b1 (LEDC max_duty макрос), M_b2 (backlight стартует с 0), M_b3 (touch INT pin config), M_b6 (i2c scan в Kconfig, default off)
+- Block D (eth): M_b4 (xWaitForAnyBits), M_b7 (phy_addr autodetect), MAC log при старте
+
+### Backlog
+- M1 (atomic для mqtt_connected) — оптимизация 2-го порядка, в Sprint 1 portMAX_DELAY уже устранён через try_lock
+- M7 (MQTT TLS + auth) — не нужно на trusted LAN
+- M10 (LVGL_LIVE_PREVIEW обёртки → CMake) — структурный refactor
+- 20 LOW — стилистика
+- Структурный: вынести board → `components/bsp_waveshare_p4_nano/`
 
 ---
 
@@ -288,6 +297,7 @@ main/
 - **2026-05-10**: первое полное ревью HMI после интеграции с актуальным API контроллера. UI-слой не покрыт по запросу пользователя (предстоит переделка).
 - **2026-05-10 — commit 6aae3cb**: Sprint 1, закрыто 13 из 15 Top-проблем (✅ Top-1..10, 12, 13, 15) тремя параллельными агентами. Остаются Top-11 и Top-14.
 - **2026-05-10 — commit abd429b**: Sprint 2, закрыты остатки Top-15 (Top-11 NVS worker queue, Top-14 eth_init resource leak) + 5 проблем категории HIGH/MEDIUM (H_c, H_e, H_e2, H7, M_c2/M_c3) тремя параллельными агентами. **Top-15 ПОЛНОСТЬЮ ЗАКРЫТ.** Из 19 HIGH остаётся ~9 (общая категория HIGH без Top-15).
+- **2026-05-10 — Sprint 4 (commit 42090f2)**: 13 MEDIUM закрыто 4-мя параллельными haiku-агентами. Остались M1/M7/M10/M_c5 (M_c5 уже закрыт ранее) + 20 LOW + структурный refactor — backlog. **30 + 13 = 43 проблемы из 73 закрыто за 4 спринта.** Главное обнаружение: M5 — массив `modbus[4]` обрезал данные от Controller который шлёт 6 устройств; теперь `DIAG_MAX_MB_DEVICES=6`.
 - **2026-05-10 — Sprint 3**: закрыты оставшиеся HIGH тремя параллельными агентами:
   - MQTT robustness: H1 (SUBSCRIBE_FAILED tracking + ACL-deny detection), H2 (MQTT fragment reassembly буфер 8K), H6 (json_get_u32 для безопасного чтения uint32 из cJSON), H8 (reconnect attempts counter)
   - HAL hardware: H_b (i2c internal pullup → external 4.7-10K), H_d (DSI cache coherency комментарий), H_d2 (draw-buffer + _Static_assert)

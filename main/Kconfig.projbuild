@@ -1,5 +1,15 @@
 menu "RO HMI Configuration"
 
+    menu "Board options"
+        config BOARD_I2C_SCAN_ON_BOOT
+            bool "I2C scan on boot (debug, ~6s delay)"
+            default n
+            help
+                Scans all 7-bit I2C addresses on boot, useful for debugging
+                new hardware. Adds ~6 seconds startup delay. Disabled by default
+                in production.
+    endmenu
+
     menu "MQTT Settings"
         config MQTT_BROKER_URI
             string "MQTT Broker URI"

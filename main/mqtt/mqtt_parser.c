@@ -33,6 +33,10 @@
 
 static const char *TAG = "mqtt_parse";
 
+/* Максимальный размер JSON-payload (защита от bomb-payload через ограничение глубины).
+ * На trusted LAN не критично, но baseline для будущего перехода на cloud broker. */
+#define MAX_JSON_PAYLOAD_SIZE 8192
+
 /* ---- Вспомогательные функции извлечения данных из JSON ---- */
 
 /**
@@ -212,6 +216,22 @@ static void parse_state(const cJSON *json)
     auto_sub_state_t asub = parse_auto_sub(json_get_string(json, "auto_sub", NULL));
     wash_sub_state_t wsub = parse_wash_sub(json_get_string(json, "wash_sub", NULL));
     uint32_t ff = json_get_u32(json, "fault_flags", 0);
+
+    /* Санитарная проверка: логичность сочетания state и подсостояний */
+    if (st == PLANT_STATE_AUTO && asub == AUTO_SUB_NONE) {
+        ESP_LOGW(TAG, "parse_state: state=AUTO but auto_sub=NONE");
+    }
+    if (st != PLANT_STATE_AUTO && asub != AUTO_SUB_NONE) {
+        ESP_LOGW(TAG, "parse_state: state=%d but auto_sub=%d (ignored)",
+                 st, asub);
+        asub = AUTO_SUB_NONE;
+    }
+    if (st != PLANT_STATE_WASHING && wsub != WASH_SUB_NONE) {
+        ESP_LOGW(TAG, "parse_state: state=%d but wash_sub=%d (ignored)",
+                 st, wsub);
+        wsub = WASH_SUB_NONE;
+    }
+
     plant_data_set_state(st, asub, wsub, ff);
 }
 
@@ -438,21 +458,21 @@ static void parse_diagnostics(const cJSON *json)
      * Парсинг массива Modbus-устройств. Контроллер с 2026-05-09 публикует
      * "modbus" как массив объектов: [{"addr":N,"errors":N,"online":true}, ...]
      * (раньше были два параллельных массива errors[] и online[]).
-     * Берём первые 4 устройства; сохраняем индексы в plant_data в том порядке,
-     * в каком пришли (UI пока не показывает adr — только сам факт ошибок/online).
+     * Берём первые DIAG_MAX_MB_DEVICES устройств; сохраняем индексы в plant_data
+     * в том порядке, в каком пришли (UI пока не показывает adr — только факт ошибок/online).
      */
     cJSON *modbus = cJSON_GetObjectItemCaseSensitive(json, "modbus");
     if (modbus && cJSON_IsArray(modbus)) {
         int total = cJSON_GetArraySize(modbus);
-        int n = total < 4 ? total : 4;
+        int n = total < DIAG_MAX_MB_DEVICES ? total : DIAG_MAX_MB_DEVICES;
         for (int i = 0; i < n; i++) {
             cJSON *dev = cJSON_GetArrayItem(modbus, i);
             if (!dev || !cJSON_IsObject(dev)) continue;
             diag.modbus_errors[i] = json_get_u32(dev, "errors", 0);
             diag.modbus_online[i] = json_get_bool(dev, "online", false);
         }
-        // Оставшиеся слоты (если устройств меньше 4) сбросить в "оффлайн без ошибок"
-        for (int i = n; i < 4; i++) {
+        // Оставшиеся слоты (если устройств меньше DIAG_MAX_MB_DEVICES) сбросить в "оффлайн без ошибок"
+        for (int i = n; i < DIAG_MAX_MB_DEVICES; i++) {
             diag.modbus_errors[i] = 0;
             diag.modbus_online[i] = false;
         }
@@ -497,7 +517,7 @@ static void parse_alarm(const cJSON *json)
     entry.active = json_get_bool(json, "active", true);
 
     const char *code = json_get_string(json, "code", "UNKNOWN");
-    strncpy(entry.code, code, sizeof(entry.code) - 1);
+    snprintf(entry.code, sizeof(entry.code), "%s", code);
 
     /*
      * ВАЖНО: alarm_ring lock не вкладывается в plant_data lock (порядок мьютексов).
@@ -553,6 +573,13 @@ void mqtt_handle_incoming(const char *topic, int topic_len,
         ESP_LOGI(TAG, "controller availability=%.*s", data_len, data);
         bool online = (data_len >= 6 && strncmp(data, "online", 6) == 0);
         plant_data_set_controller_online(online);
+        return;
+    }
+
+    // Защита от bomb-payload через ограничение размера перед парсингом
+    if (data_len > MAX_JSON_PAYLOAD_SIZE) {
+        ESP_LOGW(TAG, "JSON payload too large: %d > %d (bomb-payload protection)",
+                 data_len, MAX_JSON_PAYLOAD_SIZE);
         return;
     }
 
